@@ -692,6 +692,10 @@ controller_interface::return_type ControllerManager::unload_controller(
   new_unused_list.clear();
   RCLCPP_DEBUG(get_logger(), "Destruct controller finished");
 
+  // remove reference interfaces from resource manager
+  resource_manager_->remove_controller_reference_interfaces(controller_name);
+  RCLCPP_DEBUG(get_logger(), "Remove reference interfaces finished");
+
   RCLCPP_DEBUG(get_logger(), "Successfully unloaded controller '%s'", controller_name.c_str());
 
   return controller_interface::return_type::OK;

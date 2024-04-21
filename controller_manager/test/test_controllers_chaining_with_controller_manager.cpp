@@ -690,6 +690,139 @@ TEST_P(
 }
 
 TEST_P(
+  TestControllerChainingWithControllerManager, test_chained_controllers_unload_and_reactivate)
+{
+  SetupControllers();
+
+  // add all controllers - CONTROLLERS HAVE TO ADDED IN EXECUTION ORDER
+  cm_->add_controller(
+    position_tracking_controller, POSITION_TRACKING_CONTROLLER,
+    test_chainable_controller::TEST_CONTROLLER_CLASS_NAME);
+  cm_->add_controller(
+    diff_drive_controller, DIFF_DRIVE_CONTROLLER,
+    test_chainable_controller::TEST_CONTROLLER_CLASS_NAME);
+  cm_->add_controller(
+    diff_drive_controller_two, DIFF_DRIVE_CONTROLLER_TWO,
+    test_chainable_controller::TEST_CONTROLLER_CLASS_NAME);
+  cm_->add_controller(
+    pid_left_wheel_controller, PID_LEFT_WHEEL,
+    test_chainable_controller::TEST_CONTROLLER_CLASS_NAME);
+  cm_->add_controller(
+    pid_right_wheel_controller, PID_RIGHT_WHEEL,
+    test_chainable_controller::TEST_CONTROLLER_CLASS_NAME);
+
+  CheckIfControllersAreAddedCorrectly();
+
+  ConfigureAndCheckControllers();
+
+  // Set ControllerManager into Debug-Mode output to have detailed output on updating controllers
+  cm_->get_logger().set_level(rclcpp::Logger::Level::Debug);
+  rclcpp::get_logger("ControllerManager::utils").set_level(rclcpp::Logger::Level::Debug);
+
+  // activate all controllers
+  ActivateAndCheckController(
+    pid_left_wheel_controller, PID_LEFT_WHEEL, PID_LEFT_WHEEL_CLAIMED_INTERFACES, 1u);
+  ActivateAndCheckController(
+    pid_right_wheel_controller, PID_RIGHT_WHEEL, PID_RIGHT_WHEEL_CLAIMED_INTERFACES, 1u);
+  ActivateAndCheckController(
+    diff_drive_controller, DIFF_DRIVE_CONTROLLER, DIFF_DRIVE_CLAIMED_INTERFACES, 1u);
+  ActivateAndCheckController(
+    position_tracking_controller, POSITION_TRACKING_CONTROLLER,
+    POSITION_CONTROLLER_CLAIMED_INTERFACES, 1u);
+
+  // all following controller in chained mode
+  ASSERT_TRUE(pid_left_wheel_controller->is_in_chained_mode());
+  ASSERT_TRUE(pid_right_wheel_controller->is_in_chained_mode());
+  ASSERT_TRUE(diff_drive_controller->is_in_chained_mode());
+
+  // update controllers are succeeded
+  UpdateAllControllerAndCheck({32.0, 128.0}, 2u);
+  UpdateAllControllerAndCheck({1024.0, 4096.0}, 3u);
+
+  // deactivate all controllers
+  DeactivateAndCheckController(
+    position_tracking_controller, POSITION_TRACKING_CONTROLLER,
+    POSITION_CONTROLLER_CLAIMED_INTERFACES, 4u);
+  DeactivateAndCheckController(
+    diff_drive_controller, DIFF_DRIVE_CONTROLLER, DIFF_DRIVE_CLAIMED_INTERFACES, 8u);
+  DeactivateAndCheckController(
+    pid_left_wheel_controller, PID_LEFT_WHEEL, PID_LEFT_WHEEL_CLAIMED_INTERFACES, 14u);
+  DeactivateAndCheckController(
+    pid_right_wheel_controller, PID_RIGHT_WHEEL, PID_RIGHT_WHEEL_CLAIMED_INTERFACES, 14u);
+
+  // all following controller in not chained mode
+  ASSERT_FALSE(pid_left_wheel_controller->is_in_chained_mode());
+  ASSERT_FALSE(pid_right_wheel_controller->is_in_chained_mode());
+  ASSERT_FALSE(diff_drive_controller->is_in_chained_mode());
+
+  // unload pid left controller
+  {
+    ControllerManagerRunner cm_runner(this);
+    EXPECT_EQ(
+      controller_interface::return_type::OK,
+      cm_->unload_controller(PID_LEFT_WHEEL));
+  }
+
+  // left pid controller is unloaded
+  EXPECT_EQ(4u, cm_->get_loaded_controllers().size());
+  EXPECT_EQ(1, pid_left_wheel_controller.use_count());
+
+  // recreate pid left controller
+  pid_left_wheel_controller = std::make_shared<TestableTestChainableController>();
+  controller_interface::InterfaceConfiguration pid_left_cmd_ifs_cfg = {
+    controller_interface::interface_configuration_type::INDIVIDUAL, {"wheel_left/velocity"}};
+  controller_interface::InterfaceConfiguration pid_left_state_ifs_cfg = {
+    controller_interface::interface_configuration_type::INDIVIDUAL, {"wheel_left/velocity"}};
+  pid_left_wheel_controller->set_command_interface_configuration(pid_left_cmd_ifs_cfg);
+  pid_left_wheel_controller->set_state_interface_configuration(pid_left_state_ifs_cfg);
+  pid_left_wheel_controller->set_reference_interface_names({"velocity"});
+
+  // add recreated pid left controller
+  {
+    ControllerManagerRunner cm_runner(this);
+    cm_->add_controller(
+      pid_left_wheel_controller, PID_LEFT_WHEEL,
+      test_chainable_controller::TEST_CONTROLLER_CLASS_NAME);
+  }
+
+  // check if pid left controller is added correctly
+  EXPECT_EQ(5u, cm_->get_loaded_controllers().size());
+  EXPECT_EQ(2, pid_left_wheel_controller.use_count());
+  EXPECT_EQ(
+    lifecycle_msgs::msg::State::PRIMARY_STATE_UNCONFIGURED,
+    pid_left_wheel_controller->get_state().id());
+
+  // configure recreated pid left controller
+  {
+    ControllerManagerRunner cm_runner(this);
+    cm_->configure_controller(PID_LEFT_WHEEL);
+    EXPECT_EQ(
+      pid_left_wheel_controller->get_state().id(),
+      lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE);
+  }
+
+  // reactivate all controllers
+  ActivateAndCheckController(
+    pid_left_wheel_controller, PID_LEFT_WHEEL, PID_LEFT_WHEEL_CLAIMED_INTERFACES, 1u);
+  ActivateAndCheckController(
+    pid_right_wheel_controller, PID_RIGHT_WHEEL, PID_RIGHT_WHEEL_CLAIMED_INTERFACES, 15u);
+  ActivateAndCheckController(
+    diff_drive_controller, DIFF_DRIVE_CONTROLLER, DIFF_DRIVE_CLAIMED_INTERFACES, 9u);
+  ActivateAndCheckController(
+    position_tracking_controller, POSITION_TRACKING_CONTROLLER,
+    POSITION_CONTROLLER_CLAIMED_INTERFACES, 5u);
+
+  // all following controller in chained mode
+  ASSERT_TRUE(pid_left_wheel_controller->is_in_chained_mode());
+  ASSERT_TRUE(pid_right_wheel_controller->is_in_chained_mode());
+  ASSERT_TRUE(diff_drive_controller->is_in_chained_mode());
+
+  // update controllers are succeeded
+  UpdateAllControllerAndCheck({32.0, 128.0}, 6u, 12u, 8u, 20u);
+  UpdateAllControllerAndCheck({1024.0, 4096.0}, 7u, 13u, 9u, 21u);
+}
+
+TEST_P(
   TestControllerChainingWithControllerManager, test_chained_controllers_activation_error_handling)
 {
   SetupControllers();
