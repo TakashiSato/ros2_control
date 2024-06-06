@@ -963,6 +963,10 @@ controller_interface::return_type ControllerManager::switch_controller(
 
   const std::vector<ControllerSpec> & controllers = rt_controllers_wrapper_.get_updated_list(guard);
 
+LABEL_START:
+  from_chained_mode_request_.clear();
+  to_chained_mode_request_.clear();
+
   // if a preceding controller is deactivated, all first-level controllers should be switched 'from'
   // chained mode
   propagate_deactivation_of_chained_mode(controllers);
@@ -975,12 +979,12 @@ controller_interface::return_type ControllerManager::switch_controller(
       std::bind(controller_name_compare, std::placeholders::_1, *ctrl_it));
     controller_interface::return_type status = controller_interface::return_type::OK;
 
-    // if controller is not inactive then do not do any following-controllers checks
-    if (!is_controller_inactive(controller_it->c))
+    // if controller is neither inactive nor active then do not do any following-controllers checks
+    if (!is_controller_inactive(controller_it->c) && !is_controller_active(controller_it->c))
     {
       RCLCPP_WARN(
         get_logger(),
-        "Controller with name '%s' is not inactive so its following "
+        "Controller with name '%s' is neither inactive and nor active so its following "
         "controllers do not have to be checked, because it cannot be activated.",
         controller_it->info.name.c_str());
       status = controller_interface::return_type::ERROR;
@@ -1006,7 +1010,7 @@ controller_interface::return_type ControllerManager::switch_controller(
         // remove controller that can not be activated from the activation request and step-back
         // iterator to correctly step to the next element in the list in the loop
         activate_request_.erase(ctrl_it);
-        --ctrl_it;
+        goto LABEL_START;
       }
       if (strictness == controller_manager_msgs::srv::SwitchController::Request::STRICT)
       {
@@ -1052,7 +1056,7 @@ controller_interface::return_type ControllerManager::switch_controller(
         // remove controller that can not be activated from the activation request and step-back
         // iterator to correctly step to the next element in the list in the loop
         deactivate_request_.erase(ctrl_it);
-        --ctrl_it;
+        goto LABEL_START;
       }
       if (strictness == controller_manager_msgs::srv::SwitchController::Request::STRICT)
       {
@@ -2106,8 +2110,11 @@ void ControllerManager::manage_switch()
 
   deactivate_controllers(rt_controller_list, deactivate_request_);
 
-  switch_chained_mode(to_chained_mode_request_, true);
+  // When the same interface is specified for both 'from' and 'to' during a controller reset, it is
+  // necessary to switch in the order 'from' then 'to', in order to disable the chained mode once
+  // and then enable it again.
   switch_chained_mode(from_chained_mode_request_, false);
+  switch_chained_mode(to_chained_mode_request_, true);
 
   // activate controllers once the switch is fully complete
   if (!switch_params_.activate_asap)
@@ -2419,24 +2426,32 @@ controller_interface::return_type ControllerManager::check_following_controllers
       return controller_interface::return_type::ERROR;
     }
 
+    const bool following_will_be_deactivated =
+      std::find(
+        deactivate_request_.begin(), deactivate_request_.end(), following_ctrl_it->info.name) !=
+      deactivate_request_.end();
+
+    const bool following_will_be_activated =
+      std::find(activate_request_.begin(), activate_request_.end(), following_ctrl_it->info.name) !=
+      activate_request_.end();
+
+    const bool following_will_be_reset =
+      (following_will_be_deactivated && following_will_be_activated);
+
     if (is_controller_active(following_ctrl_it->c))
     {
       // will following controller be deactivated?
-      if (
-        std::find(
-          deactivate_request_.begin(), deactivate_request_.end(), following_ctrl_it->info.name) !=
-        deactivate_request_.end())
+      if (following_will_be_deactivated && !following_will_be_reset)
       {
         RCLCPP_WARN(
-          get_logger(), "The following controller with name '%s' will be deactivated.",
+          get_logger(),
+          "The following controller with name '%s' will be deactivated and will not be activated.",
           following_ctrl_it->info.name.c_str());
         return controller_interface::return_type::ERROR;
       }
     }
     // check if following controller will not be activated
-    else if (
-      std::find(activate_request_.begin(), activate_request_.end(), following_ctrl_it->info.name) ==
-      activate_request_.end())
+    else if (!following_will_be_activated)
     {
       RCLCPP_WARN(
         get_logger(),
@@ -2461,7 +2476,12 @@ controller_interface::return_type ControllerManager::check_following_controllers
     // // insert to the begin of activate request list to be activated before preceding controller
     //   activate_request_.insert(activate_request_.begin(), following_ctrl_name);
     // }
-    if (!following_ctrl_it->c->is_in_chained_mode())
+
+    // If the target following_ctrl to be activated is not in chained_mode, add it to
+    // to_chained_mode_request. Alternatively, if it is already in chained_mode but is subject to
+    // reset, it needs to be removed from chained_mode once during deactivation and then
+    // transitioned back to chained_mode, so add it to to_chained_mode_request.
+    if (!following_ctrl_it->c->is_in_chained_mode() || following_will_be_reset)
     {
       auto found_it = std::find(
         to_chained_mode_request_.begin(), to_chained_mode_request_.end(),
@@ -2543,12 +2563,36 @@ controller_interface::return_type ControllerManager::check_preceeding_controller
         continue;
       }
 
-      // check if preceding controller will be activated
-      if (
-        is_controller_inactive(preceding_ctrl_it->c) &&
+      const bool this_controller_will_be_reset =
+        (std::find(activate_request_.begin(), activate_request_.end(), controller_it->info.name) !=
+         activate_request_.end());
+
+      const bool preceding_will_be_deactivated =
+        std::find(
+          deactivate_request_.begin(), deactivate_request_.end(), preceding_ctrl_it->info.name) !=
+        deactivate_request_.end();
+
+      const bool preceding_will_be_activated =
         std::find(
           activate_request_.begin(), activate_request_.end(), preceding_ctrl_it->info.name) !=
-          activate_request_.end())
+        activate_request_.end();
+
+      const bool preceding_will_be_reset =
+        (preceding_will_be_deactivated && preceding_will_be_activated);
+
+      // if controller and preceding controller will be reset go the next once
+      if (this_controller_will_be_reset && preceding_will_be_reset)
+      {
+        RCLCPP_DEBUG(
+          get_logger(),
+          "Controller with name '%s' and preceding controller with name '%s' "
+          "will be reset.",
+          controller_it->info.name.c_str(), preceding_ctrl_it->info.name.c_str());
+        continue;
+      }
+
+      // check if preceding controller will be activated
+      if (is_controller_inactive(preceding_ctrl_it->c) && preceding_will_be_activated)
       {
         RCLCPP_WARN(
           get_logger(),
@@ -2558,11 +2602,7 @@ controller_interface::return_type ControllerManager::check_preceeding_controller
         return controller_interface::return_type::ERROR;
       }
       // check if preceding controller will not be deactivated
-      else if (
-        is_controller_active(preceding_ctrl_it->c) &&
-        std::find(
-          deactivate_request_.begin(), deactivate_request_.end(), preceding_ctrl_it->info.name) ==
-          deactivate_request_.end())
+      else if (is_controller_active(preceding_ctrl_it->c) && !preceding_will_be_deactivated)
       {
         RCLCPP_WARN(
           get_logger(),
@@ -2571,6 +2611,7 @@ controller_interface::return_type ControllerManager::check_preceeding_controller
           controller_it->info.name.c_str(), preceding_ctrl_it->info.name.c_str());
         return controller_interface::return_type::ERROR;
       }
+
       // TODO(destogl): this should be discussed how to it the best - just a placeholder for now
       // else if (
       //  strictness ==
