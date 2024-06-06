@@ -206,6 +206,12 @@ public:
   CONTROLLER_MANAGER_PUBLIC
   void shutdown_async_controllers_and_components();
 
+  CONTROLLER_MANAGER_PUBLIC
+  std::vector<std::string> get_ordered_controllers_names() const
+  {
+    return ordered_controllers_names_;
+  }
+
 protected:
   CONTROLLER_MANAGER_PUBLIC
   void init_services();

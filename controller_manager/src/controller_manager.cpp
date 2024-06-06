@@ -958,6 +958,49 @@ controller_interface::return_type ControllerManager::switch_controller(
     return ret;
   }
 
+  RCLCPP_WARN(get_logger(), "----------------");
+  RCLCPP_WARN(get_logger(), "Activating controllers:");
+  for (const auto & controller : activate_request_)
+  {
+    RCLCPP_WARN(get_logger(), " - %s", controller.c_str());
+  }
+  RCLCPP_WARN(get_logger(), "Deactivating controllers:");
+  for (const auto & controller : deactivate_request_)
+  {
+    RCLCPP_WARN(get_logger(), " - %s", controller.c_str());
+  }
+  RCLCPP_WARN(get_logger(), "----------------");
+
+  auto sortAByB = [](std::vector<std::string> & A, const std::vector<std::string> & B)
+  {
+    // Bの要素の位置を記録するマップを作成
+    std::unordered_map<std::string, size_t> indexMap;
+    for (size_t i = 0; i < B.size(); ++i)
+    {
+      indexMap[B[i]] = i;
+    }
+
+    // Aの要素をBの順序に従ってソート
+    std::sort(
+      A.begin(), A.end(), [&indexMap](const std::string & a, const std::string & b)
+      { return indexMap[a] < indexMap[b]; });
+  };
+  sortAByB(activate_request_, ordered_controllers_names_);
+  sortAByB(deactivate_request_, ordered_controllers_names_);
+
+  RCLCPP_WARN(get_logger(), "SORTED----------------");
+  RCLCPP_WARN(get_logger(), "Activating controllers:");
+  for (const auto & controller : activate_request_)
+  {
+    RCLCPP_WARN(get_logger(), " - %s", controller.c_str());
+  }
+  RCLCPP_WARN(get_logger(), "Deactivating controllers:");
+  for (const auto & controller : deactivate_request_)
+  {
+    RCLCPP_WARN(get_logger(), " - %s", controller.c_str());
+  }
+  RCLCPP_WARN(get_logger(), "----------------");
+
   // lock controllers
   std::lock_guard<std::recursive_mutex> guard(rt_controllers_wrapper_.controllers_lock_);
 
@@ -1009,7 +1052,14 @@ LABEL_START:
         //  controller_manager_msgs::srv::SwitchController::Request::MANIPULATE_CONTROLLERS_CHAIN);
         // remove controller that can not be activated from the activation request and step-back
         // iterator to correctly step to the next element in the list in the loop
+        auto find_it =
+          std::find(to_chained_mode_request_.begin(), to_chained_mode_request_.end(), *ctrl_it);
+        if (find_it != to_chained_mode_request_.end())
+        {
+          to_chained_mode_request_.erase(find_it);
+        }
         activate_request_.erase(ctrl_it);
+        --ctrl_it;
         goto LABEL_START;
       }
       if (strictness == controller_manager_msgs::srv::SwitchController::Request::STRICT)
@@ -1055,7 +1105,15 @@ LABEL_START:
       {
         // remove controller that can not be activated from the activation request and step-back
         // iterator to correctly step to the next element in the list in the loop
+        auto find_it =
+          std::find(from_chained_mode_request_.begin(), from_chained_mode_request_.end(), *ctrl_it);
+        if (find_it != from_chained_mode_request_.end())
+        {
+          from_chained_mode_request_.erase(find_it);
+        }
+
         deactivate_request_.erase(ctrl_it);
+        --ctrl_it;
         goto LABEL_START;
       }
       if (strictness == controller_manager_msgs::srv::SwitchController::Request::STRICT)
@@ -1067,6 +1125,19 @@ LABEL_START:
       }
     }
   }
+
+  RCLCPP_WARN(get_logger(), "EXECUTING----------------");
+  RCLCPP_WARN(get_logger(), "Activating controllers:");
+  for (const auto & controller : activate_request_)
+  {
+    RCLCPP_WARN(get_logger(), " - %s", controller.c_str());
+  }
+  RCLCPP_WARN(get_logger(), "Deactivating controllers:");
+  for (const auto & controller : deactivate_request_)
+  {
+    RCLCPP_WARN(get_logger(), " - %s", controller.c_str());
+  }
+  RCLCPP_WARN(get_logger(), "----------------");
 
   for (const auto & controller : controllers)
   {
