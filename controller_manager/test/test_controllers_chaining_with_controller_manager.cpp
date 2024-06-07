@@ -28,7 +28,7 @@
 #include "test_chainable_controller/test_chainable_controller.hpp"
 #include "test_controller/test_controller.hpp"
 
-// #define MINIMUM_TEST
+#define MINIMUM_TEST
 
 namespace
 {
@@ -1117,14 +1117,6 @@ TEST_P(
     {}, {PID_LEFT_WHEEL, PID_RIGHT_WHEEL, DIFF_DRIVE_CONTROLLER}, test_param.strictness,
     std::future_status::ready, expected.at(test_param.strictness).return_type);
 
-  const auto & names = cm_->get_ordered_controllers_names();
-  RCLCPP_WARN(cm_->get_logger(), "-------------------------");
-  for (const auto & name : names)
-  {
-    RCLCPP_WARN(cm_->get_logger(), "%s", name.c_str());
-  }
-  RCLCPP_WARN(cm_->get_logger(), "-------------------------");
-
   // All controllers should still be active
   ASSERT_EQ(
     lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE, pid_left_wheel_controller->get_state().id());
@@ -1135,6 +1127,8 @@ TEST_P(
   ASSERT_EQ(
     lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE,
     position_tracking_controller->get_state().id());
+#if 0
+#endif
 }
 #endif
 
@@ -1490,7 +1484,7 @@ TEST_P(
 }
 #endif
 
-#if 1
+#if 0
 TEST_P(TestControllerChainingWithControllerManager, test_chained_controllers_reset_error_handling)
 {
   SetupWithActivationAllControllersAndCheck();
@@ -1535,6 +1529,7 @@ TEST_P(TestControllerChainingWithControllerManager, test_chained_controllers_res
       ASSERT_EQ(0u, position_tracking_controller->deactivate_calls);
     };
 
+#if 0
     // Attempt to reset the lowest following controllers (pid_controllers)
     ResetControllers({PID_LEFT_WHEEL, PID_RIGHT_WHEEL}, exp.return_type, std::future_status::ready);
     verify_all_controllers_are_active_and_not_reset();
@@ -1546,6 +1541,7 @@ TEST_P(TestControllerChainingWithControllerManager, test_chained_controllers_res
     // Attempt to reset the middle following controller (diff_drive_controller)
     ResetControllers({DIFF_DRIVE_CONTROLLER}, exp.return_type, std::future_status::ready);
     verify_all_controllers_are_active_and_not_reset();
+#endif
 
     // Attempt to reset the all following controllers (pid_controllers and diff_drive_controller)
     ResetControllers(

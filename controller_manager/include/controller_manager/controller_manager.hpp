@@ -354,6 +354,9 @@ private:
    */
   void propagate_deactivation_of_chained_mode(const std::vector<ControllerSpec> & controllers);
 
+  void propagate_activation_and_deactivation_of_chained_mode(
+    const std::vector<ControllerSpec> & controllers);
+
   /// Check if all the following controllers will be in active state and in the chained mode
   /// after controllers' switch.
   /**
@@ -381,7 +384,7 @@ private:
    */
   controller_interface::return_type check_following_controllers_for_activate(
     const std::vector<ControllerSpec> & controllers, int strictness,
-    const ControllersListIterator controller_it);
+    const ControllersListIterator controller_it) const;
 
   /// Check if all the preceding controllers will be in inactive state after controllers' switch.
   /**
@@ -404,7 +407,7 @@ private:
    */
   controller_interface::return_type check_preceeding_controllers_for_deactivate(
     const std::vector<ControllerSpec> & controllers, int strictness,
-    const ControllersListIterator controller_it);
+    const ControllersListIterator controller_it) const;
 
   /**
    * @brief Inserts a controller into an ordered list based on dependencies to compute the
