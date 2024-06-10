@@ -1139,7 +1139,9 @@ controller_interface::return_type ControllerManager::switch_controller(
       }
 
       // followingが chainable でない場合、activate できない
-      if (in_activate_list && !check_following_is_chainable(controller.c))
+      if (
+        (is_active || is_inactive) && in_activate_list &&
+        !check_following_is_chainable(controller.c))
       {
         auto conflict_status = handle_conflict(
           "Could not activate controller '" + controller.info.name +
@@ -2899,11 +2901,24 @@ ControllerManager::check_preceding_and_following_controllers_for_switch(
     return ConflictStatus::CONFLICT_WITH_BEST_EFFORT;
   };
 
+  // check if there are controllers to (de)activate
+  if (activate_request.empty() && deactivate_request.empty())
+  {
+    RCLCPP_DEBUG(logger, "No controllers to (de)activate");
+    return controller_interface::return_type::OK;
+  }
+
   // preceding -> following の順に整合性をチェックする
   for (const auto & controller : controllers)
   {
     const bool is_active = is_controller_active(*controller.c);
     const bool is_inactive = is_controller_inactive(*controller.c);
+
+    // skip controllers that are not active nor inactive
+    if (!is_active && !is_inactive)
+    {
+      continue;
+    }
 
     // get pointers to places in deactivate and activate lists ((de)activate lists have changed)
     auto deactivate_list_it =
@@ -2916,6 +2931,7 @@ ControllerManager::check_preceding_and_following_controllers_for_switch(
 
     std::vector<std::reference_wrapper<const controller_manager::ControllerSpec>>
       following_ctrl_refs;
+
     for (const auto & cmd_itf_name : controller.c->command_interface_configuration().names)
     {
       // controller that 'cmd_tf_name' belongs to
