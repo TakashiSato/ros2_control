@@ -993,151 +993,9 @@ controller_interface::return_type ControllerManager::switch_controller(
 
   const std::vector<ControllerSpec> & controllers = rt_controllers_wrapper_.get_updated_list(guard);
 
-  // 関数の入出力を明確にするために、メンバ変数の参照をローカル変数に持たせて各ラムダに渡す
-  auto & activate_request = activate_request_;
-  auto & deactivate_request = deactivate_request_;
-  const auto & logger = get_logger();
-
-  // cleanup switch request first
-  const auto cleanup_request =
-    [&controllers, &activate_request, &deactivate_request, &strictness, &logger]()
-  {
-    const auto check_following_is_chainable = [&controllers, &logger](const auto & controller)
-    {
-      for (const auto & cmd_itf_name : controller->command_interface_configuration().names)
-      {
-        ControllersListIterator following_ctrl_it;
-        // Check if interface if reference interface and following controller exist.
-        if (!command_interface_is_reference_interface_of_controller(
-              cmd_itf_name, controllers, following_ctrl_it))
-        {
-          continue;
-        }
-        // TODO(destogl): performance of this code could be optimized by adding additional lists
-        // with controllers that cache if the check has failed and has succeeded. Then the following
-        // would be done only once per controller, otherwise in complex scenarios the same
-        // controller is checked multiple times
-
-        // check that all following controllers exits, are either: activated, will be activated, or
-        // will not be deactivated
-        RCLCPP_DEBUG(
-          logger, "Checking following controller with name '%s'.",
-          following_ctrl_it->info.name.c_str());
-
-        // check if following controller is chainable
-        if (!following_ctrl_it->c->is_chainable())
-        {
-          RCLCPP_WARN(
-            logger,
-            "No reference interface '%s' exist, since the following controller with name '%s' "
-            "is not chainable.",
-            cmd_itf_name.c_str(), following_ctrl_it->info.name.c_str());
-          return false;
-        }
-      }
-      return true;
-    };
-
-    for (const auto & controller : controllers)
-    {
-      const bool is_active = is_controller_active(*controller.c);
-      const bool is_inactive = is_controller_inactive(*controller.c);
-
-      // get pointers to places in deactivate and activate lists ((de)activate lists have changed)
-      auto deactivate_list_it =
-        std::find(deactivate_request.begin(), deactivate_request.end(), controller.info.name);
-      bool in_deactivate_list = deactivate_list_it != deactivate_request.end();
-
-      auto activate_list_it =
-        std::find(activate_request.begin(), activate_request.end(), controller.info.name);
-      bool in_activate_list = activate_list_it != activate_request.end();
-
-      auto handle_conflict = [&](const std::string & msg)
-      {
-        if (strictness == controller_manager_msgs::srv::SwitchController::Request::STRICT)
-        {
-          RCLCPP_ERROR(logger, "%s", msg.c_str());
-          deactivate_request.clear();
-          activate_request.clear();
-          return controller_interface::return_type::ERROR;
-        }
-        RCLCPP_WARN(logger, "%s", msg.c_str());
-        return controller_interface::return_type::OK;
-      };
-
-      // check for double stop
-      if (!is_active && in_deactivate_list)
-      {
-        auto conflict_status = handle_conflict(
-          "Could not deactivate controller '" + controller.info.name + "' since it is not active");
-        if (conflict_status != controller_interface::return_type::OK)
-        {
-          return conflict_status;
-        }
-        in_deactivate_list = false;
-        deactivate_request.erase(deactivate_list_it);
-      }
-
-      // check for doubled activation
-      if (is_active && !in_deactivate_list && in_activate_list)
-      {
-        auto conflict_status = handle_conflict(
-          "Could not activate controller '" + controller.info.name +
-          "' since it is already active");
-        if (conflict_status != controller_interface::return_type::OK)
-        {
-          return conflict_status;
-        }
-        in_activate_list = false;
-        activate_request.erase(activate_list_it);
-      }
-
-      // check for illegal activation of an unconfigured/finalized controller
-      if (!is_inactive && !in_deactivate_list && in_activate_list)
-      {
-        auto conflict_status = handle_conflict(
-          "Could not activate controller '" + controller.info.name +
-          "' since it is not in inactive state");
-        if (conflict_status != controller_interface::return_type::OK)
-        {
-          return conflict_status;
-        }
-        in_activate_list = false;
-        activate_request.erase(activate_list_it);
-      }
-
-      // followingが chainable でない場合、activate できない
-      if (
-        (is_active || is_inactive) && in_activate_list &&
-        !check_following_is_chainable(controller.c))
-      {
-        auto conflict_status = handle_conflict(
-          "Could not activate controller '" + controller.info.name +
-          "' since it has not chainable following controller");
-        if (conflict_status != controller_interface::return_type::OK)
-        {
-          return conflict_status;
-        }
-        in_activate_list = false;
-        activate_request.erase(activate_list_it);
-      }
-    }
-
-    return controller_interface::return_type::OK;
-  };
-
-  if (cleanup_request() != controller_interface::return_type::OK)
-  {
-    RCLCPP_ERROR(get_logger(), "Aborting, no controller is switched! (::STRICT switch)");
-    // reset all lists
-    clear_requests();
-    return controller_interface::return_type::ERROR;
-  }
-  show_list("AFTER CLEANUP");
-
   if (
     check_preceding_and_following_controllers_for_switch(
-      controllers, deactivate_request, activate_request, to_chained_mode_request_,
+      controllers, deactivate_request_, activate_request_, to_chained_mode_request_,
       from_chained_mode_request_, strictness) != controller_interface::return_type::OK)
   {
     RCLCPP_ERROR(get_logger(), "Aborting, no controller is switched! (::STRICT switch)");
@@ -2392,13 +2250,28 @@ void ControllerManager::shutdown_async_controllers_and_components()
   resource_manager_->shutdown_async_components();
 }
 
+struct ActivationState
+{
+  bool is_active;
+  bool is_inactive;
+  bool in_deactivate_list;
+  bool in_activate_list;
+};
+
 std::vector<std::reference_wrapper<const controller_manager::ControllerSpec>>
 list_following_controllers(
-  const controller_manager::ControllerSpec & controller,
+  const controller_manager::ControllerSpec & controller, const ActivationState & controller_state,
   const std::vector<controller_manager::ControllerSpec> & controllers)
 {
-  std::vector<std::reference_wrapper<const controller_manager::ControllerSpec>> following_ctrl_refs;
+  // If the controller is neither active nor inactive (in which case it is likely either
+  // unconfigured or finalized), it is impossible to retrieve the command_interface configuration,
+  // so return an empty vector
+  if (!controller_state.is_active && !controller_state.is_inactive)
+  {
+    return {};
+  }
 
+  std::vector<std::reference_wrapper<const controller_manager::ControllerSpec>> following_ctrl_refs;
   for (const auto & cmd_itf_name : controller.c->command_interface_configuration().names)
   {
     // controller that 'cmd_tf_name' belongs to
@@ -2451,14 +2324,6 @@ bool erase_from_vector(std::vector<std::string> & vec, const std::string & erase
   return true;
 }
 
-struct ActivationState
-{
-  bool is_active;
-  bool is_inactive;
-  bool in_deactivate_list;
-  bool in_activate_list;
-};
-
 ActivationState get_activation_state(
   const controller_manager::ControllerSpec & controller,
   const std::vector<std::string> & deactivate_request,
@@ -2478,6 +2343,43 @@ ActivationState get_activation_state(
   return state;
 }
 
+enum class ConflictStatus
+{
+  NO_CONFLICT,
+  CONFLICT_WITH_BEST_EFFORT,
+  CONFLICT_WITH_STRICT,
+};
+
+ConflictStatus handle_conflict_of_switch_request(
+  const rclcpp::Logger & logger, const std::string & msg,
+  std::vector<std::string> & deactivate_request, std::vector<std::string> & activate_request,
+  std::vector<std::string> & to_chained_mode_request,
+  std::vector<std::string> & from_chained_mode_request, const int strictness,
+  const std::string & erase_from_activate = "", const std::string & erase_from_deactivate = "")
+{
+  if (strictness == controller_manager_msgs::srv::SwitchController::Request::STRICT)
+  {
+    RCLCPP_ERROR(logger, "%s", msg.c_str());
+    deactivate_request.clear();
+    activate_request.clear();
+    to_chained_mode_request.clear();
+    from_chained_mode_request.clear();
+    return ConflictStatus::CONFLICT_WITH_STRICT;
+  }
+
+  RCLCPP_WARN(logger, "%s", msg.c_str());
+  if (!erase_from_activate.empty())
+  {
+    erase_from_vector(activate_request, erase_from_activate);
+  }
+  if (!erase_from_deactivate.empty())
+  {
+    erase_from_vector(deactivate_request, erase_from_deactivate);
+  }
+
+  return ConflictStatus::CONFLICT_WITH_BEST_EFFORT;
+};
+
 enum class CheckConsistencyResult
 {
   None,
@@ -2486,6 +2388,66 @@ enum class CheckConsistencyResult
   Error,
 };
 
+controller_interface::return_type check_consistency_of_controller(
+  const rclcpp::Logger & logger, hardware_interface::ResourceManager & resource_manager,
+  const ControllerSpec & controller, std::vector<std::string> & deactivate_request,
+  std::vector<std::string> & activate_request, std::vector<std::string> & to_chained_mode_request,
+  std::vector<std::string> & from_chained_mode_request, const int strictness)
+{
+  const auto handle_conflict = [&](
+                                 const std::string & msg, const std::string & erase_from_activate,
+                                 const std::string & erase_from_deactivate)
+  {
+    return handle_conflict_of_switch_request(
+      logger, msg, deactivate_request, activate_request, to_chained_mode_request,
+      from_chained_mode_request, strictness, erase_from_activate, erase_from_deactivate);
+  };
+
+  auto ctrl_state = get_activation_state(controller, deactivate_request, activate_request);
+
+  // check for double stop
+  if (!ctrl_state.is_active && ctrl_state.in_deactivate_list)
+  {
+    if (
+      handle_conflict(
+        "Could not deactivate controller '" + controller.info.name + "' since it is not active", "",
+        controller.info.name) == ConflictStatus::CONFLICT_WITH_STRICT)
+    {
+      return controller_interface::return_type::ERROR;
+    }
+    ctrl_state.in_deactivate_list = false;
+  }
+
+  // check for doubled activation
+  if (ctrl_state.is_active && !ctrl_state.in_deactivate_list && ctrl_state.in_activate_list)
+  {
+    if (
+      handle_conflict(
+        "Could not activate controller '" + controller.info.name + "' since it is already active",
+        controller.info.name, "") == ConflictStatus::CONFLICT_WITH_STRICT)
+    {
+      return controller_interface::return_type::ERROR;
+    }
+    ctrl_state.in_activate_list = false;
+  }
+
+  // check for illegal activation of an unconfigured/finalized controller
+  if (!ctrl_state.is_inactive && !ctrl_state.in_deactivate_list && ctrl_state.in_activate_list)
+  {
+    if (
+      handle_conflict(
+        "Could not activate controller '" + controller.info.name +
+          "' since it is not in inactive state",
+        controller.info.name, "") == ConflictStatus::CONFLICT_WITH_STRICT)
+    {
+      return controller_interface::return_type::ERROR;
+    }
+    ctrl_state.in_activate_list = false;
+  }
+
+  return controller_interface::return_type::OK;
+}
+
 CheckConsistencyResult check_consistency_of_preceding_and_following(
   const rclcpp::Logger & logger, hardware_interface::ResourceManager & resource_manager,
   const ControllerSpec & preceding_ctrl, const ActivationState preceding_state,
@@ -2493,39 +2455,13 @@ CheckConsistencyResult check_consistency_of_preceding_and_following(
   std::vector<std::string> & activate_request, std::vector<std::string> & to_chained_mode_request,
   std::vector<std::string> & from_chained_mode_request, const int strictness)
 {
-  enum class ConflictStatus
+  const auto handle_conflict = [&](
+                                 const std::string & msg, const std::string & erase_from_activate,
+                                 const std::string & erase_from_deactivate)
   {
-    NO_CONFLICT,
-    CONFLICT_WITH_BEST_EFFORT,
-    CONFLICT_WITH_STRICT,
-  };
-
-  auto handle_conflict = [&logger, &deactivate_request, &activate_request, &to_chained_mode_request,
-                          &from_chained_mode_request, strictness](
-                           const std::string & msg, const std::string & erase_from_activate = "",
-                           const std::string & erase_from_deactivate = "") -> ConflictStatus
-  {
-    if (strictness == controller_manager_msgs::srv::SwitchController::Request::STRICT)
-    {
-      RCLCPP_ERROR(logger, "%s", msg.c_str());
-      deactivate_request.clear();
-      activate_request.clear();
-      to_chained_mode_request.clear();
-      from_chained_mode_request.clear();
-      return ConflictStatus::CONFLICT_WITH_STRICT;
-    }
-
-    RCLCPP_WARN(logger, "%s", msg.c_str());
-    if (!erase_from_activate.empty())
-    {
-      erase_from_vector(activate_request, erase_from_activate);
-    }
-    if (!erase_from_deactivate.empty())
-    {
-      erase_from_vector(deactivate_request, erase_from_deactivate);
-    }
-
-    return ConflictStatus::CONFLICT_WITH_BEST_EFFORT;
+    return handle_conflict_of_switch_request(
+      logger, msg, deactivate_request, activate_request, to_chained_mode_request,
+      from_chained_mode_request, strictness, erase_from_activate, erase_from_deactivate);
   };
 
   const auto following_state =
@@ -2546,6 +2482,25 @@ CheckConsistencyResult check_consistency_of_preceding_and_following(
 
   const auto check_conflict = [&]()
   {
+    // check if following controller is chainable
+    if (preceding_state.in_activate_list && !following_ctrl.c->is_chainable())
+    {
+      const auto conflict_status = handle_conflict(
+        "The preceding controller with name '" + preceding_ctrl.info.name +
+          "' cannot be activated because the following controller with name '" +
+          following_ctrl.info.name + "' is not chainable.",
+        preceding_ctrl.info.name, "");
+      if (conflict_status == ConflictStatus::CONFLICT_WITH_STRICT)
+      {
+        return CheckConsistencyResult::Error;
+      }
+      else if (conflict_status == ConflictStatus::CONFLICT_WITH_BEST_EFFORT)
+      {
+        // BEST_EFFORTの場合はprecedingをactivateリストから削除したため、次のpreceding に進む
+        return CheckConsistencyResult::CheckNextPreceding;
+      }
+    }
+
     // 1. preceding が inactive から activate される場合のエラー判定
     if (preceding_state.is_inactive && preceding_state.in_activate_list)
     {
@@ -2749,20 +2704,34 @@ ControllerManager::check_preceding_and_following_controllers_for_switch(
   // Check for consistency in the order of "preceding" to "following"
   // Note: If the order of controllers is not sorted in the sequence of preceding -> following, the
   // subsequent processes will not function properly.
-  for (const auto & preceding_ctrl : controllers)
+  for (const auto & controller : controllers)
   {
-    const auto preceding_state =
-      get_activation_state(preceding_ctrl, deactivate_request, activate_request);
-
-    // If the controller is neither active nor inactive (in which case it is likely either
-    // unconfigured or finalized), the following check is skipped
-    if (!preceding_state.is_active && !preceding_state.is_inactive)
+    // check for consistency of (de)activate request for the controller
+    if (
+      check_consistency_of_controller(
+        logger, *resource_manager_, controller, deactivate_request, activate_request,
+        to_chained_mode_request, from_chained_mode_request,
+        strictness) != controller_interface::return_type::OK)
     {
-      return controller_interface::return_type::OK;
+      return controller_interface::return_type::ERROR;
     }
 
-    // get following controllers references for the preceding controller
-    const auto following_ctrl_refs = list_following_controllers(preceding_ctrl, controllers);
+    const auto ctrl_state = get_activation_state(controller, deactivate_request, activate_request);
+
+    // get following controllers references for the controller
+    const auto following_ctrl_refs =
+      list_following_controllers(controller, ctrl_state, controllers);
+
+    // if there are no following controllers, this controller is not a preceding controller, so skip
+    // the following checks
+    if (following_ctrl_refs.empty())
+    {
+      continue;
+    }
+
+    // this controller is a preceding controller
+    const auto & preceding_ctrl = controller;
+    const auto & preceding_state = ctrl_state;
 
     // check consistency of the preceding and each following controller
     for (const auto & following_ctrl_ref : following_ctrl_refs)
