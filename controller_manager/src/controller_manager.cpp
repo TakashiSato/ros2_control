@@ -2819,10 +2819,45 @@ void ControllerManager::propagate_activation_and_deactivation_of_chained_mode(
   while (!propagate_activation() || !propagate_deactivation());
 }
 
-void ControllerManager::check_preceding_and_following_controllers_for_switch(
+controller_interface::return_type
+ControllerManager::check_preceding_and_following_controllers_for_switch(
   const std::vector<ControllerSpec> & controllers, std::vector<std::string> & deactivate_request,
-  std::vector<std::string> & activate_request)
+  std::vector<std::string> & activate_request, const int strictness)
 {
+  const auto logger = get_logger();
+
+  auto handle_conflict = [&](
+                           const std::string & msg, const std::string & erase_from_activate = "",
+                           const std::string & erase_from_deactivate = "")
+  {
+    if (strictness == controller_manager_msgs::srv::SwitchController::Request::STRICT)
+    {
+      RCLCPP_ERROR(logger, "%s", msg.c_str());
+      deactivate_request.clear();
+      activate_request.clear();
+      return controller_interface::return_type::ERROR;
+    }
+    RCLCPP_WARN(logger, "%s", msg.c_str());
+    if (!erase_from_activate.empty())
+    {
+      auto it = std::find(activate_request.begin(), activate_request.end(), erase_from_activate);
+      if (it != activate_request.end())
+      {
+        activate_request.erase(it);
+      }
+    }
+    if (!erase_from_deactivate.empty())
+    {
+      auto it =
+        std::find(deactivate_request.begin(), deactivate_request.end(), erase_from_deactivate);
+      if (it != deactivate_request.end())
+      {
+        deactivate_request.erase(it);
+      }
+    }
+    return controller_interface::return_type::OK;
+  };
+
   // for (const std::string & ordered_controller_name : ordered_controllers_names_)
   // {
   // }
@@ -2870,21 +2905,77 @@ void ControllerManager::check_preceding_and_following_controllers_for_switch(
         std::find(activate_request.begin(), activate_request.end(), following_ctrl_it->info.name) !=
         activate_request.end();
 
-      // preceding が inactive で activate される場合
-      if (is_inactive && !in_activate_list)
+      controller_interface::return_type conflict_status = controller_interface::return_type::OK;
+
+      // 1. preceding が inactive から activate される場合のエラー判定
+      if (is_inactive && in_activate_list)
       {
-        // following が inactive で activate されない場合はエラー
-        if (following_is_inactive && following_in_activate_list)
+        // 以下のいずれかの場合は preceding を activate できないためエラー
+        // 1-a. following が inactive で activate されない場合
+        // 1-b. following が active で deactivateされ、かつ、restart されない場合
+        // エラー発生かつstrictがBEST_EFFORTの場合は、precedingをactivateリストから削除
+        if (following_is_inactive && !following_in_activate_list)
         {
-          // ERROR
+          conflict_status = handle_conflict(
+            "The controller with name '" + controller.info.name +
+              "' cannot be activated because the following controller with name '" +
+              following_ctrl_it->info.name + "' is inactive and will not be activated.",
+            controller.info.name, "");
         }
-        // followingがactiveでdeactivateされ、かつ、restart されない場合はエラー
         if (following_is_active && following_in_deactivate_list && !following_in_activate_list)
         {
-          // ERROR
+          handle_conflict(
+            "The controller with name '" + controller.info.name +
+              "' cannot be activated because the following controller with name '" +
+              following_ctrl_it->info.name +
+              "' is active and will be deactivated but will not be activated.",
+            controller.info.name, "");
         }
       }
+      // 2. preceding が active のまま遷移がない場合のエラー判定
+      else if (is_active && !in_deactivate_list && !in_activate_list)
+      {
+        // 以下のいずれかの場合は following を deactivate できない (結果として restart もできない)
+        // ためエラー
+        // 2-1. following が active で deactivate される場合
+        // 2-2. following が active で restart される場合
+        // -> 結局のところ、following が activate されるか否かを問わず、deactivate
+        // される場合はエラー
+        // エラー発生かつstrictがBEST_EFFORTの場合はfollowingをactivate/deactivateリストから削除
+        if (following_is_active && !following_in_deactivate_list)
+        {
+          conflict_status = handle_conflict(
+            "The following controller with name '" + following_ctrl_it->info.name +
+              "' cannot be deactivated because the preceding controller with name '" +
+              controller.info.name + "' is active and will not be deactivated and restarted.",
+            following_ctrl_it->info.name, following_ctrl_it->info.name);
+        }
+      }
+      // 3. preceding が active で restart される場合のエラー判定
+      else if (is_active && in_deactivate_list && in_activate_list)
+      {
+        // following が active で deactivate され、かつ、restart しない場合は following を
+        // deactivate できないためエラー
+        // エラー発生かつstrictがBEST_EFFORTの場合はfollowingをdeactivateリストから削除
+        if (following_is_active && following_in_deactivate_list && !following_in_activate_list)
+        {
+          conflict_status = handle_conflict(
+            "The following controller with name '" + following_ctrl_it->info.name +
+              "' cannot be deactivated because the preceding controller with name '" +
+              controller.info.name + "' is active and will be restarted.",
+            "", following_ctrl_it->info.name);
+        }
+      }
+
+      if (conflict_status != controller_interface::return_type::OK)
+      {
+        return conflict_status;
+      }
+
+      // TODO: chained mode の追加処理
     }
+
+    return controller_interface::return_type::OK;
   }
 
   controller_interface::return_type ControllerManager::check_following_controllers_for_activate(
@@ -2905,10 +2996,10 @@ void ControllerManager::check_preceding_and_following_controllers_for_switch(
       {
         continue;
       }
-      // TODO(destogl): performance of this code could be optimized by adding additional lists with
-      // controllers that cache if the check has failed and has succeeded. Then the following would
-      // be done only once per controller, otherwise in complex scenarios the same controller is
-      // checked multiple times
+      // TODO(destogl): performance of this code could be optimized by adding additional lists
+      // with controllers that cache if the check has failed and has succeeded. Then the following
+      // would be done only once per controller, otherwise in complex scenarios the same
+      // controller is checked multiple times
 
       // check that all following controllers exits, are either: activated, will be activated, or
       // will not be deactivated
@@ -2973,7 +3064,8 @@ void ControllerManager::check_preceding_and_following_controllers_for_switch(
       // else if (strictness ==
       //  controller_manager_msgs::srv::SwitchController::Request::MANIPULATE_CONTROLLERS_CHAIN)
       // {
-      // // insert to the begin of activate request list to be activated before preceding controller
+      // // insert to the begin of activate request list to be activated before preceding
+      // controller
       //   activate_request_.insert(activate_request_.begin(), following_ctrl_name);
       // }
 
@@ -3065,8 +3157,8 @@ void ControllerManager::check_preceding_and_following_controllers_for_switch(
     {
       std::vector<ControllersListIterator> preceding_controllers_using_ref_itf;
 
-      // TODO(destogl): This data could be cached after configuring controller into a map for faster
-      // access here
+      // TODO(destogl): This data could be cached after configuring controller into a map for
+      // faster access here
       for (auto preceding_ctrl_it = controllers.begin(); preceding_ctrl_it != controllers.end();
            ++preceding_ctrl_it)
       {

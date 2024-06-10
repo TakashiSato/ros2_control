@@ -409,8 +409,9 @@ private:
     const std::vector<ControllerSpec> & controllers, int strictness,
     const ControllersListIterator controller_it) const;
 
-  void check_preceding_and_following_controllers_for_switch(
-    const std::vector<ControllerSpec> & controllers);
+  controller_interface::return_type check_preceding_and_following_controllers_for_switch(
+    const std::vector<ControllerSpec> & controllers, std::vector<std::string> & deactivate_request,
+    std::vector<std::string> & activate_request, const int strictness);
 
   /**
    * @brief Inserts a controller into an ordered list based on dependencies to compute the
