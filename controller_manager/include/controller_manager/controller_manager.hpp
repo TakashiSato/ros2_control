@@ -411,7 +411,8 @@ private:
 
   controller_interface::return_type check_preceding_and_following_controllers_for_switch(
     const std::vector<ControllerSpec> & controllers, std::vector<std::string> & deactivate_request,
-    std::vector<std::string> & activate_request, const int strictness);
+    std::vector<std::string> & activate_request, std::vector<std::string> & to_chained_mode_request,
+    std::vector<std::string> & from_chained_mode_request, const int strictness) const;
 
   /**
    * @brief Inserts a controller into an ordered list based on dependencies to compute the

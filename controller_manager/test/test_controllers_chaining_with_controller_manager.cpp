@@ -28,8 +28,6 @@
 #include "test_chainable_controller/test_chainable_controller.hpp"
 #include "test_controller/test_controller.hpp"
 
-#define MINIMUM_TEST
-
 namespace
 {
 template <typename T, typename... Args>
@@ -456,15 +454,21 @@ public:
   {
     for (const auto & interface : claimed_interfaces)
     {
-      EXPECT_TRUE(cm_->resource_manager_->command_interface_exists(interface));
-      EXPECT_TRUE(cm_->resource_manager_->command_interface_is_available(interface));
-      EXPECT_TRUE(cm_->resource_manager_->command_interface_is_claimed(interface));
+      EXPECT_TRUE(cm_->resource_manager_->command_interface_exists(interface))
+        << "command interface: " << interface << " does not exist";
+      EXPECT_TRUE(cm_->resource_manager_->command_interface_is_available(interface))
+        << "command interface: " << interface << " is not available";
+      EXPECT_TRUE(cm_->resource_manager_->command_interface_is_claimed(interface))
+        << "command interface: " << interface << " is not claimed";
     }
     for (const auto & interface : not_claimed_interfaces)
     {
-      EXPECT_TRUE(cm_->resource_manager_->command_interface_exists(interface));
-      EXPECT_TRUE(cm_->resource_manager_->command_interface_is_available(interface));
-      EXPECT_FALSE(cm_->resource_manager_->command_interface_is_claimed(interface));
+      EXPECT_TRUE(cm_->resource_manager_->command_interface_exists(interface))
+        << "command interface: " << interface << " does not exist";
+      EXPECT_TRUE(cm_->resource_manager_->command_interface_is_available(interface))
+        << "command interface: " << interface << " is not available";
+      EXPECT_FALSE(cm_->resource_manager_->command_interface_is_claimed(interface))
+        << "command interface: " << interface << " is claimed";
     }
   };
 
@@ -526,14 +530,18 @@ public:
         PID_RIGHT_WHEEL_CLAIMED_INTERFACES),
       POSITION_CONTROLLER_NOT_CLAIMED_INTERFACES);
 
-    // Verify that activate has been executed only once before reset
-    ASSERT_EQ(1u, pid_left_wheel_controller->activate_calls);
-    ASSERT_EQ(1u, pid_right_wheel_controller->activate_calls);
-    ASSERT_EQ(1u, diff_drive_controller->activate_calls);
+    // Verify that activate and deactivate calls
+    // (All controllers are activated once at the beginning,
+    // and all following controllers are activated once more for switching to chained mode
+    // and deactivated for switching to chained mode when the preceding controller is
+    // activated)
+    ASSERT_EQ(2u, pid_left_wheel_controller->activate_calls);
+    ASSERT_EQ(2u, pid_right_wheel_controller->activate_calls);
+    ASSERT_EQ(2u, diff_drive_controller->activate_calls);
     ASSERT_EQ(1u, position_tracking_controller->activate_calls);
-    ASSERT_EQ(0u, pid_left_wheel_controller->deactivate_calls);
-    ASSERT_EQ(0u, pid_right_wheel_controller->deactivate_calls);
-    ASSERT_EQ(0u, diff_drive_controller->deactivate_calls);
+    ASSERT_EQ(1u, pid_left_wheel_controller->deactivate_calls);
+    ASSERT_EQ(1u, pid_right_wheel_controller->deactivate_calls);
+    ASSERT_EQ(1u, diff_drive_controller->deactivate_calls);
     ASSERT_EQ(0u, position_tracking_controller->deactivate_calls);
   }
 
@@ -585,8 +593,6 @@ public:
     uint8_t state;
   };
 };
-
-#ifndef MINIMUM_TEST
 
 // The tests are implementing example of chained-control for DiffDrive robot shown here:
 // https://github.com/ros-controls/roadmap/blob/9f32e215a84347aee0b519cb24d081f23bbbb224/design_drafts/cascade_control.md#motivation-purpose-and-use
@@ -962,9 +968,7 @@ TEST_P(
   ASSERT_EQ(
     lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE, diff_drive_controller_two->get_state().id());
 }
-#endif
 
-#if 1
 TEST_P(
   TestControllerChainingWithControllerManager, test_chained_controllers_deactivation_error_handling)
 {
@@ -1038,6 +1042,8 @@ TEST_P(
 
   // Test Case 6: following controller is deactivated but preceding controller will be activated
   // --> return error; controllers stay in the same state
+
+  RCLCPP_ERROR(cm_->get_logger(), "======================================");
 
   switch_test_controllers(
     {DIFF_DRIVE_CONTROLLER}, {PID_LEFT_WHEEL, PID_RIGHT_WHEEL}, test_param.strictness,
@@ -1127,12 +1133,8 @@ TEST_P(
   ASSERT_EQ(
     lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE,
     position_tracking_controller->get_state().id());
-#if 0
-#endif
 }
-#endif
 
-#ifndef MINIMUM_TEST
 TEST_P(TestControllerChainingWithControllerManager, test_chained_controllers_adding_in_random_order)
 {
   SetupControllers();
@@ -1294,13 +1296,13 @@ TEST_P(TestControllerChainingWithControllerManager, test_chained_controllers_res
       POSITION_CONTROLLER_NOT_CLAIMED_INTERFACES);
 
     // Verify that only the reset controller has its activate and deactivate calls incremented.
-    ASSERT_EQ(1u, pid_left_wheel_controller->activate_calls);       // +0
-    ASSERT_EQ(1u, pid_right_wheel_controller->activate_calls);      // +0
-    ASSERT_EQ(1u, diff_drive_controller->activate_calls);           // +0
+    ASSERT_EQ(2u, pid_left_wheel_controller->activate_calls);       // +0
+    ASSERT_EQ(2u, pid_right_wheel_controller->activate_calls);      // +0
+    ASSERT_EQ(2u, diff_drive_controller->activate_calls);           // +0
     ASSERT_EQ(2u, position_tracking_controller->activate_calls);    // +1 (reset)
-    ASSERT_EQ(0u, pid_left_wheel_controller->deactivate_calls);     // +0
-    ASSERT_EQ(0u, pid_right_wheel_controller->deactivate_calls);    // +0
-    ASSERT_EQ(0u, diff_drive_controller->deactivate_calls);         // +0
+    ASSERT_EQ(1u, pid_left_wheel_controller->deactivate_calls);     // +0
+    ASSERT_EQ(1u, pid_right_wheel_controller->deactivate_calls);    // +0
+    ASSERT_EQ(1u, diff_drive_controller->deactivate_calls);         // +0
     ASSERT_EQ(1u, position_tracking_controller->deactivate_calls);  // +1 (reset)
 
     // Verify update after reset most preceding controller
@@ -1324,13 +1326,13 @@ TEST_P(TestControllerChainingWithControllerManager, test_chained_controllers_res
       POSITION_CONTROLLER_NOT_CLAIMED_INTERFACES);
 
     // Verify that the activate and deactivate calls of all controllers are incremented
-    ASSERT_EQ(2u, pid_left_wheel_controller->activate_calls);       // +1 (reset)
-    ASSERT_EQ(2u, pid_right_wheel_controller->activate_calls);      // +1 (reset)
-    ASSERT_EQ(2u, diff_drive_controller->activate_calls);           // +1 (reset)
+    ASSERT_EQ(3u, pid_left_wheel_controller->activate_calls);       // +1 (reset)
+    ASSERT_EQ(3u, pid_right_wheel_controller->activate_calls);      // +1 (reset)
+    ASSERT_EQ(3u, diff_drive_controller->activate_calls);           // +1 (reset)
     ASSERT_EQ(3u, position_tracking_controller->activate_calls);    // +1 (reset)
-    ASSERT_EQ(1u, pid_left_wheel_controller->deactivate_calls);     // +1 (reset)
-    ASSERT_EQ(1u, pid_right_wheel_controller->deactivate_calls);    // +1 (reset)
-    ASSERT_EQ(1u, diff_drive_controller->deactivate_calls);         // +1 (reset)
+    ASSERT_EQ(2u, pid_left_wheel_controller->deactivate_calls);     // +1 (reset)
+    ASSERT_EQ(2u, pid_right_wheel_controller->deactivate_calls);    // +1 (reset)
+    ASSERT_EQ(2u, diff_drive_controller->deactivate_calls);         // +1 (reset)
     ASSERT_EQ(2u, position_tracking_controller->deactivate_calls);  // +1 (reset)
 
     // Verify update again after reset all controllers
@@ -1357,13 +1359,13 @@ TEST_P(TestControllerChainingWithControllerManager, test_chained_controllers_res
 
     // Verify that the activate and deactivate calls for diff_drive_controller are incremented,
     // and only the deactivate count for position_tracking_controller is incremented.
-    ASSERT_EQ(2u, pid_left_wheel_controller->activate_calls);       // +0
-    ASSERT_EQ(2u, pid_right_wheel_controller->activate_calls);      // +0
-    ASSERT_EQ(3u, diff_drive_controller->activate_calls);           // +1 (reset)
+    ASSERT_EQ(3u, pid_left_wheel_controller->activate_calls);       // +0
+    ASSERT_EQ(3u, pid_right_wheel_controller->activate_calls);      // +0
+    ASSERT_EQ(4u, diff_drive_controller->activate_calls);           // +1 (reset)
     ASSERT_EQ(3u, position_tracking_controller->activate_calls);    // +0
-    ASSERT_EQ(1u, pid_left_wheel_controller->deactivate_calls);     // +0
-    ASSERT_EQ(1u, pid_right_wheel_controller->deactivate_calls);    // +0
-    ASSERT_EQ(2u, diff_drive_controller->deactivate_calls);         // +1 (reset)
+    ASSERT_EQ(2u, pid_left_wheel_controller->deactivate_calls);     // +0
+    ASSERT_EQ(2u, pid_right_wheel_controller->deactivate_calls);    // +0
+    ASSERT_EQ(3u, diff_drive_controller->deactivate_calls);         // +1 (reset)
     ASSERT_EQ(3u, position_tracking_controller->deactivate_calls);  // +1 (deactivate)
   }
 
@@ -1381,13 +1383,13 @@ TEST_P(TestControllerChainingWithControllerManager, test_chained_controllers_res
         POSITION_CONTROLLER_NOT_CLAIMED_INTERFACES, POSITION_CONTROLLER_CLAIMED_INTERFACES));
 
     // Verify that only the reset controller has its activate and deactivate calls incremented.
-    ASSERT_EQ(2u, pid_left_wheel_controller->activate_calls);       // +0
-    ASSERT_EQ(3u, pid_right_wheel_controller->activate_calls);      // +1 (reset)
-    ASSERT_EQ(4u, diff_drive_controller->activate_calls);           // +1 (reset)
+    ASSERT_EQ(3u, pid_left_wheel_controller->activate_calls);       // +0
+    ASSERT_EQ(4u, pid_right_wheel_controller->activate_calls);      // +1 (reset)
+    ASSERT_EQ(5u, diff_drive_controller->activate_calls);           // +1 (reset)
     ASSERT_EQ(3u, position_tracking_controller->activate_calls);    // +0
-    ASSERT_EQ(1u, pid_left_wheel_controller->deactivate_calls);     // +0
-    ASSERT_EQ(2u, pid_right_wheel_controller->deactivate_calls);    // +1 (reset)
-    ASSERT_EQ(3u, diff_drive_controller->deactivate_calls);         // +1 (reset)
+    ASSERT_EQ(2u, pid_left_wheel_controller->deactivate_calls);     // +0
+    ASSERT_EQ(3u, pid_right_wheel_controller->deactivate_calls);    // +1 (reset)
+    ASSERT_EQ(4u, diff_drive_controller->deactivate_calls);         // +1 (reset)
     ASSERT_EQ(3u, position_tracking_controller->deactivate_calls);  // +0
   }
 
@@ -1408,13 +1410,13 @@ TEST_P(TestControllerChainingWithControllerManager, test_chained_controllers_res
 
     // Verify that the activate and deactivate calls for diff_drive_controller are incremented,
     // and only the deactivate count for position_tracking_controller is incremented.
-    ASSERT_EQ(2u, pid_left_wheel_controller->activate_calls);       // +0
-    ASSERT_EQ(3u, pid_right_wheel_controller->activate_calls);      // +0
-    ASSERT_EQ(5u, diff_drive_controller->activate_calls);           // +1 (reset)
+    ASSERT_EQ(3u, pid_left_wheel_controller->activate_calls);       // +0
+    ASSERT_EQ(4u, pid_right_wheel_controller->activate_calls);      // +0
+    ASSERT_EQ(6u, diff_drive_controller->activate_calls);           // +1 (reset)
     ASSERT_EQ(4u, position_tracking_controller->activate_calls);    // +1 (activate)
-    ASSERT_EQ(1u, pid_left_wheel_controller->deactivate_calls);     // +0
-    ASSERT_EQ(2u, pid_right_wheel_controller->deactivate_calls);    // +0
-    ASSERT_EQ(4u, diff_drive_controller->deactivate_calls);         // +1 (reset)
+    ASSERT_EQ(2u, pid_left_wheel_controller->deactivate_calls);     // +0
+    ASSERT_EQ(3u, pid_right_wheel_controller->deactivate_calls);    // +0
+    ASSERT_EQ(5u, diff_drive_controller->deactivate_calls);         // +1 (reset)
     ASSERT_EQ(3u, position_tracking_controller->deactivate_calls);  // +0
   }
 }
@@ -1443,48 +1445,43 @@ TEST_P(
       POSITION_CONTROLLER_NOT_CLAIMED_INTERFACES);
 
     // Verify activate and deactivate calls are not changed
-    ASSERT_EQ(1u, pid_left_wheel_controller->activate_calls);       // +0
-    ASSERT_EQ(1u, pid_right_wheel_controller->activate_calls);      // +0
-    ASSERT_EQ(1u, diff_drive_controller->activate_calls);           // +0
+    ASSERT_EQ(2u, pid_left_wheel_controller->activate_calls);       // +0
+    ASSERT_EQ(2u, pid_right_wheel_controller->activate_calls);      // +0
+    ASSERT_EQ(2u, diff_drive_controller->activate_calls);           // +0
     ASSERT_EQ(1u, position_tracking_controller->activate_calls);    // +0
-    ASSERT_EQ(0u, pid_left_wheel_controller->deactivate_calls);     // +0
-    ASSERT_EQ(0u, pid_right_wheel_controller->deactivate_calls);    // +0
-    ASSERT_EQ(0u, diff_drive_controller->deactivate_calls);         // +0
+    ASSERT_EQ(1u, pid_left_wheel_controller->deactivate_calls);     // +0
+    ASSERT_EQ(1u, pid_right_wheel_controller->deactivate_calls);    // +0
+    ASSERT_EQ(1u, diff_drive_controller->deactivate_calls);         // +0
     ASSERT_EQ(0u, position_tracking_controller->deactivate_calls);  // +0
   }
   else if (test_param.strictness == BEST_EFFORT)
   {
-    // If BEST_EFFORT, since the stop request for the diff_drive_controller is accepted, the
-    // position_tracking_controller should not be reactivated after being deactivated, and an OK
-    // response should be returned
+    // If BEST_EFFORT, since the stop request for the diff_drive_controller is accepted, and the
+    // restart request for position_tracking_controller is accepted, and an OK response is returned
     switch_test_controllers(
       {POSITION_TRACKING_CONTROLLER}, {POSITION_TRACKING_CONTROLLER, DIFF_DRIVE_CONTROLLER},
       BEST_EFFORT, std::future_status::timeout, controller_interface::return_type::OK);
 
-    // Verify that only the interface of pid controllers is claimed due to the deactivation of
-    // preceding controllers
+    // Verify that the claimed state of the interface does not change before and after the reset
     check_command_interfaces_claimed(
-      concat_vector(PID_LEFT_WHEEL_CLAIMED_INTERFACES, PID_RIGHT_WHEEL_CLAIMED_INTERFACES),
       concat_vector(
-        POSITION_CONTROLLER_NOT_CLAIMED_INTERFACES, POSITION_CONTROLLER_CLAIMED_INTERFACES,
-        DIFF_DRIVE_CLAIMED_INTERFACES));
+        POSITION_CONTROLLER_CLAIMED_INTERFACES, DIFF_DRIVE_CLAIMED_INTERFACES,
+        PID_LEFT_WHEEL_CLAIMED_INTERFACES, PID_RIGHT_WHEEL_CLAIMED_INTERFACES),
+      POSITION_CONTROLLER_NOT_CLAIMED_INTERFACES);
 
-    // Verify that the deactivate calls for the preceding controllers are incremented, and
-    // confirm that the activate and deactivate calls are incremented for the pid controllers
-    // due to the internal reset process, as it is no longer a following controller
-    ASSERT_EQ(2u, pid_left_wheel_controller->activate_calls);       // +1 (reset)
-    ASSERT_EQ(2u, pid_right_wheel_controller->activate_calls);      // +1 (reset)
-    ASSERT_EQ(1u, diff_drive_controller->activate_calls);           // +0
-    ASSERT_EQ(1u, position_tracking_controller->activate_calls);    // +0
-    ASSERT_EQ(1u, pid_left_wheel_controller->deactivate_calls);     // +1 (reset)
-    ASSERT_EQ(1u, pid_right_wheel_controller->deactivate_calls);    // +1 (reset)
-    ASSERT_EQ(1u, diff_drive_controller->deactivate_calls);         // +1 (deactivate)
-    ASSERT_EQ(1u, position_tracking_controller->deactivate_calls);  // +1 (deactivate)
+    // Verify that only the restart position_tracking_controller  has its activate and deactivate
+    // calls incremented.
+    ASSERT_EQ(2u, pid_left_wheel_controller->activate_calls);       // +0
+    ASSERT_EQ(2u, pid_right_wheel_controller->activate_calls);      // +0
+    ASSERT_EQ(2u, diff_drive_controller->activate_calls);           // +0
+    ASSERT_EQ(2u, position_tracking_controller->activate_calls);    // +1 (reset)
+    ASSERT_EQ(1u, pid_left_wheel_controller->deactivate_calls);     // +0
+    ASSERT_EQ(1u, pid_right_wheel_controller->deactivate_calls);    // +0
+    ASSERT_EQ(1u, diff_drive_controller->deactivate_calls);         // +0
+    ASSERT_EQ(1u, position_tracking_controller->deactivate_calls);  // +1 (reset)
   }
 }
-#endif
 
-#if 0
 TEST_P(TestControllerChainingWithControllerManager, test_chained_controllers_reset_error_handling)
 {
   SetupWithActivationAllControllersAndCheck();
@@ -1519,17 +1516,16 @@ TEST_P(TestControllerChainingWithControllerManager, test_chained_controllers_res
         position_tracking_controller->get_state().id());
 
       // All controllers should not have their activate and deactivate calls incremented
-      ASSERT_EQ(1u, pid_left_wheel_controller->activate_calls);
-      ASSERT_EQ(1u, pid_right_wheel_controller->activate_calls);
-      ASSERT_EQ(1u, diff_drive_controller->activate_calls);
+      ASSERT_EQ(2u, pid_left_wheel_controller->activate_calls);
+      ASSERT_EQ(2u, pid_right_wheel_controller->activate_calls);
+      ASSERT_EQ(2u, diff_drive_controller->activate_calls);
       ASSERT_EQ(1u, position_tracking_controller->activate_calls);
-      ASSERT_EQ(0u, pid_left_wheel_controller->deactivate_calls);
-      ASSERT_EQ(0u, pid_right_wheel_controller->deactivate_calls);
-      ASSERT_EQ(0u, diff_drive_controller->deactivate_calls);
+      ASSERT_EQ(1u, pid_left_wheel_controller->deactivate_calls);
+      ASSERT_EQ(1u, pid_right_wheel_controller->deactivate_calls);
+      ASSERT_EQ(1u, diff_drive_controller->deactivate_calls);
       ASSERT_EQ(0u, position_tracking_controller->deactivate_calls);
     };
 
-#if 0
     // Attempt to reset the lowest following controllers (pid_controllers)
     ResetControllers({PID_LEFT_WHEEL, PID_RIGHT_WHEEL}, exp.return_type, std::future_status::ready);
     verify_all_controllers_are_active_and_not_reset();
@@ -1541,7 +1537,6 @@ TEST_P(TestControllerChainingWithControllerManager, test_chained_controllers_res
     // Attempt to reset the middle following controller (diff_drive_controller)
     ResetControllers({DIFF_DRIVE_CONTROLLER}, exp.return_type, std::future_status::ready);
     verify_all_controllers_are_active_and_not_reset();
-#endif
 
     // Attempt to reset the all following controllers (pid_controllers and diff_drive_controller)
     ResetControllers(
@@ -1550,8 +1545,8 @@ TEST_P(TestControllerChainingWithControllerManager, test_chained_controllers_res
     verify_all_controllers_are_active_and_not_reset();
   }
 }
-#endif
 
 INSTANTIATE_TEST_SUITE_P(
   test_strict_best_effort, TestControllerChainingWithControllerManager,
-  testing::Values(strict, best_effort));
+  testing::Values(strict, best_effort), [](const testing::TestParamInfo<Strictness> & info_)
+  { return info_.param.strictness == STRICT ? "STRICT" : "BEST_EFFORT"; });
