@@ -154,6 +154,34 @@ void remove_element_from_list(std::vector<T> & list, const T & element)
   }
 }
 
+template <typename T>
+void sort_list_by_another(
+  std::vector<T> & sorting_list, const std::vector<T> & ordered_list,
+  const bool reverse_order = false)
+{
+  // Create index map of the ordered list
+  std::unordered_map<std::string, size_t> index_map;
+  for (size_t i = 0; i < ordered_list.size(); ++i)
+  {
+    index_map[ordered_list[i]] = i;
+  }
+
+  // sort the sorting list based on the index map order
+  std::sort(
+    sorting_list.begin(), sorting_list.end(),
+    [&index_map, reverse_order](const std::string & a, const std::string & b)
+    {
+      if (reverse_order)
+      {
+        return index_map[a] > index_map[b];
+      }
+      else
+      {
+        return index_map[a] < index_map[b];
+      }
+    });
+}
+
 void controller_chain_spec_cleanup(
   std::unordered_map<std::string, controller_manager::ControllerChainSpec> & ctrl_chain_spec,
   const std::string & controller)
@@ -169,6 +197,72 @@ void controller_chain_spec_cleanup(
     remove_element_from_list(ctrl_chain_spec[preced_ctrl].following_controllers, controller);
   }
   ctrl_chain_spec.erase(controller);
+}
+
+struct ActivationState
+{
+  bool is_active;
+  bool is_inactive;
+  bool in_deactivate_list;
+  bool in_activate_list;
+};
+
+ActivationState get_activation_state(
+  const controller_manager::ControllerSpec & controller,
+  const std::vector<std::string> & deactivate_request,
+  const std::vector<std::string> & activate_request)
+{
+  ActivationState state;
+
+  state.is_active = is_controller_active(controller.c);
+  state.is_inactive = is_controller_inactive(controller.c);
+  state.in_deactivate_list =
+    std::find(deactivate_request.begin(), deactivate_request.end(), controller.info.name) !=
+    deactivate_request.end();
+  state.in_activate_list =
+    std::find(activate_request.begin(), activate_request.end(), controller.info.name) !=
+    activate_request.end();
+
+  return state;
+}
+
+std::vector<std::reference_wrapper<const controller_manager::ControllerSpec>>
+list_following_controllers(
+  const controller_manager::ControllerSpec & controller, const ActivationState & controller_state,
+  const std::vector<controller_manager::ControllerSpec> & controllers)
+{
+  // If the controller is neither active nor inactive (in which case it is likely either
+  // unconfigured or finalized), it is impossible to retrieve the command_interface configuration,
+  // so return an empty vector
+  if (!controller_state.is_active && !controller_state.is_inactive)
+  {
+    return {};
+  }
+
+  std::vector<std::reference_wrapper<const controller_manager::ControllerSpec>> following_ctrl_refs;
+  for (const auto & cmd_itf_name : controller.c->command_interface_configuration().names)
+  {
+    // controller that 'cmd_tf_name' belongs to
+    controller_manager::ControllersListIterator following_ctrl_it;
+    if (!command_interface_is_reference_interface_of_controller(
+          cmd_itf_name, controllers, following_ctrl_it))
+    {
+      // interfaces that are not related to the chain do not need to be checked
+      continue;
+    }
+
+    // check if the controller is already in the list
+    if (
+      std::find_if(
+        following_ctrl_refs.begin(), following_ctrl_refs.end(),
+        [&](const auto & ctrl) { return ctrl.get().info.name == following_ctrl_it->info.name; }) ==
+      following_ctrl_refs.end())
+    {
+      following_ctrl_refs.push_back(std::cref(*following_ctrl_it));
+    }
+  }
+
+  return following_ctrl_refs;
 }
 
 }  // namespace
@@ -1008,14 +1102,6 @@ controller_interface::return_type ControllerManager::switch_controller(
 
   for (const auto & controller : controllers)
   {
-    auto deactivate_list_it =
-      std::find(deactivate_request_.begin(), deactivate_request_.end(), controller.info.name);
-    bool in_deactivate_list = deactivate_list_it != deactivate_request_.end();
-
-    auto activate_list_it =
-      std::find(activate_request_.begin(), activate_request_.end(), controller.info.name);
-    bool in_activate_list = activate_list_it != activate_request_.end();
-
     const auto extract_interfaces_for_controller =
       [this](const ControllerSpec ctrl, std::vector<std::string> & request_interface_list)
     {
@@ -1036,11 +1122,14 @@ controller_interface::return_type ControllerManager::switch_controller(
         command_interface_names.end());
     };
 
-    if (in_activate_list)
+    const auto activation_state =
+      get_activation_state(controller, deactivate_request_, activate_request_);
+
+    if (activation_state.in_activate_list)
     {
       extract_interfaces_for_controller(controller, activate_command_interface_request_);
     }
-    if (in_deactivate_list)
+    if (activation_state.in_deactivate_list)
     {
       extract_interfaces_for_controller(controller, deactivate_command_interface_request_);
     }
@@ -1050,7 +1139,7 @@ controller_interface::return_type ControllerManager::switch_controller(
     // outdated. Keeping it up to date is not easy because of stopping controllers from multiple
     // threads maybe we should not at all cache this but always search for the related controllers
     // to a hardware when error in hardware happens
-    if (in_activate_list)
+    if (activation_state.in_activate_list)
     {
       std::vector<std::string> interface_names = {};
 
@@ -1085,33 +1174,11 @@ controller_interface::return_type ControllerManager::switch_controller(
     }
   }
 
-  auto sortAByB =
-    [](std::vector<std::string> & A, const std::vector<std::string> & B, bool reverse = false)
-  {
-    // Bの要素の位置を記録するマップを作成
-    std::unordered_map<std::string, size_t> indexMap;
-    for (size_t i = 0; i < B.size(); ++i)
-    {
-      indexMap[B[i]] = i;
-    }
-
-    // Aの要素をBの順序に従ってソート
-    std::sort(
-      A.begin(), A.end(),
-      [&indexMap, reverse](const std::string & a, const std::string & b)
-      {
-        if (reverse)
-        {
-          return indexMap[a] > indexMap[b];
-        }
-        else
-        {
-          return indexMap[a] < indexMap[b];
-        }
-      });
-  };
-  sortAByB(deactivate_request_, ordered_controllers_names_, false);
-  sortAByB(activate_request_, ordered_controllers_names_, true);
+  // To ensure that the appropriate (de)activation are performed, sort deactivate requests in
+  // the order of preceding to following, and sort activate requests in the reverse order of
+  // following to preceding
+  sort_list_by_another(deactivate_request_, ordered_controllers_names_, false);
+  sort_list_by_another(activate_request_, ordered_controllers_names_, true);
   show_list("FINALLY");
 
   if (activate_request_.empty() && deactivate_request_.empty())
@@ -2250,99 +2317,6 @@ void ControllerManager::shutdown_async_controllers_and_components()
   resource_manager_->shutdown_async_components();
 }
 
-struct ActivationState
-{
-  bool is_active;
-  bool is_inactive;
-  bool in_deactivate_list;
-  bool in_activate_list;
-};
-
-std::vector<std::reference_wrapper<const controller_manager::ControllerSpec>>
-list_following_controllers(
-  const controller_manager::ControllerSpec & controller, const ActivationState & controller_state,
-  const std::vector<controller_manager::ControllerSpec> & controllers)
-{
-  // If the controller is neither active nor inactive (in which case it is likely either
-  // unconfigured or finalized), it is impossible to retrieve the command_interface configuration,
-  // so return an empty vector
-  if (!controller_state.is_active && !controller_state.is_inactive)
-  {
-    return {};
-  }
-
-  std::vector<std::reference_wrapper<const controller_manager::ControllerSpec>> following_ctrl_refs;
-  for (const auto & cmd_itf_name : controller.c->command_interface_configuration().names)
-  {
-    // controller that 'cmd_tf_name' belongs to
-    ControllersListIterator following_ctrl_it;
-    if (!command_interface_is_reference_interface_of_controller(
-          cmd_itf_name, controllers, following_ctrl_it))
-    {
-      // interfaces that are not related to the chain do not need to be checked
-      continue;
-    }
-
-    // check if the controller is already in the list
-    if (
-      std::find_if(
-        following_ctrl_refs.begin(), following_ctrl_refs.end(),
-        [&](const auto & ctrl) { return ctrl.get().info.name == following_ctrl_it->info.name; }) ==
-      following_ctrl_refs.end())
-    {
-      following_ctrl_refs.push_back(std::cref(*following_ctrl_it));
-    }
-  }
-
-  return following_ctrl_refs;
-}
-
-bool add_to_vector(std::vector<std::string> & vec, const std::string & add_target)
-{
-  if (std::find(vec.begin(), vec.end(), add_target) != vec.end())
-  {
-    // already exists
-    return false;
-  }
-
-  // add
-  vec.push_back(add_target);
-  return true;
-}
-
-bool erase_from_vector(std::vector<std::string> & vec, const std::string & erase_target)
-{
-  auto it = std::find(vec.begin(), vec.end(), erase_target);
-  if (it == vec.end())
-  {
-    // not found
-    return false;
-  }
-
-  // erase
-  vec.erase(it);
-  return true;
-}
-
-ActivationState get_activation_state(
-  const controller_manager::ControllerSpec & controller,
-  const std::vector<std::string> & deactivate_request,
-  const std::vector<std::string> & activate_request)
-{
-  ActivationState state;
-
-  state.is_active = is_controller_active(controller.c);
-  state.is_inactive = is_controller_inactive(controller.c);
-  state.in_deactivate_list =
-    std::find(deactivate_request.begin(), deactivate_request.end(), controller.info.name) !=
-    deactivate_request.end();
-  state.in_activate_list =
-    std::find(activate_request.begin(), activate_request.end(), controller.info.name) !=
-    activate_request.end();
-
-  return state;
-}
-
 enum class ConflictStatus
 {
   NO_CONFLICT,
@@ -2370,11 +2344,11 @@ ConflictStatus handle_conflict_of_switch_request(
   RCLCPP_WARN(logger, "%s", msg.c_str());
   if (!erase_from_activate.empty())
   {
-    erase_from_vector(activate_request, erase_from_activate);
+    remove_element_from_list(activate_request, erase_from_activate);
   }
   if (!erase_from_deactivate.empty())
   {
-    erase_from_vector(deactivate_request, erase_from_deactivate);
+    remove_element_from_list(deactivate_request, erase_from_deactivate);
   }
 
   return ConflictStatus::CONFLICT_WITH_BEST_EFFORT;
@@ -2622,12 +2596,7 @@ CheckConsistencyResult check_consistency_of_preceding_and_following(
       (preceding_state.in_deactivate_list && !preceding_will_be_restarted) ||
       both_will_be_restarted)
     {
-      if (add_to_vector(from_chained_mode_request, following_ctrl.info.name))
-      {
-        RCLCPP_DEBUG(
-          logger, "Adding following controller with name '%s' to 'from' chained mode request.",
-          following_ctrl.info.name.c_str());
-      }
+      add_element_to_list(from_chained_mode_request, following_ctrl.info.name);
       in_from_chained_mode_list = true;
     }
 
@@ -2637,21 +2606,16 @@ CheckConsistencyResult check_consistency_of_preceding_and_following(
     if (
       (preceding_state.in_activate_list && !preceding_will_be_restarted) || both_will_be_restarted)
     {
-      if (add_to_vector(to_chained_mode_request, following_ctrl.info.name))
-      {
-        RCLCPP_DEBUG(
-          logger, "Adding following controller with name '%s' to 'to' chained mode request.",
-          following_ctrl.info.name.c_str());
-
-        // if it is a chainable controller, make the reference interfaces available on
-        // preactivation (This is needed when you activate a couple of chainable controller
-        // altogether)
-        if (!following_ctrl.c->is_in_chained_mode())
-        {
-          resource_manager.make_controller_reference_interfaces_available(following_ctrl.info.name);
-        }
-      }
+      add_element_to_list(to_chained_mode_request, following_ctrl.info.name);
       in_to_chained_mode_list = true;
+
+      // if it is a chainable controller, make the reference interfaces available on
+      // preactivation (This is needed when you activate a couple of chainable controller
+      // altogether)
+      if (!following_ctrl.c->is_in_chained_mode())
+      {
+        resource_manager.make_controller_reference_interfaces_available(following_ctrl.info.name);
+      }
     }
 
     // if a change to the chained_mode has been requested and the following is active and will not
@@ -2667,8 +2631,8 @@ CheckConsistencyResult check_consistency_of_preceding_and_following(
           "restart.",
           following_ctrl.info.name.c_str());
 
-        add_to_vector(deactivate_request, following_ctrl.info.name);
-        add_to_vector(activate_request, following_ctrl.info.name);
+        add_element_to_list(deactivate_request, following_ctrl.info.name);
+        add_element_to_list(activate_request, following_ctrl.info.name);
       };
     }
   };
