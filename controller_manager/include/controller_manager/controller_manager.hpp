@@ -206,12 +206,6 @@ public:
   CONTROLLER_MANAGER_PUBLIC
   void shutdown_async_controllers_and_components();
 
-  CONTROLLER_MANAGER_PUBLIC
-  std::vector<std::string> get_ordered_controllers_names() const
-  {
-    return ordered_controllers_names_;
-  }
-
 protected:
   CONTROLLER_MANAGER_PUBLIC
   void init_services();
@@ -377,10 +371,23 @@ private:
     const ControllersListIterator controller_it) const;
 #endif
 
-  controller_interface::return_type check_preceding_and_following_controllers_for_switch(
-    const std::vector<ControllerSpec> & controllers, std::vector<std::string> & deactivate_request,
-    std::vector<std::string> & activate_request, std::vector<std::string> & to_chained_mode_request,
-    std::vector<std::string> & from_chained_mode_request, const int strictness) const;
+  void extract_de_activate_command_interface_request(
+    const std::vector<ControllerSpec> & controllers,
+    const std::vector<std::string> & deactivate_request,
+    const std::vector<std::string> & activate_request,
+    std::vector<std::string> & deactivate_command_interface_request,
+    std::vector<std::string> & activate_command_interface_request) const;
+
+  void cache_controller_interfaces_in_activate_request(
+    const std::vector<ControllerSpec> & controllers,
+    const std::vector<std::string> & activate_request);
+
+  controller_interface::return_type
+  check_de_activate_request_conflict_and_create_chained_mode_request(
+    const int strictness, const std::vector<ControllerSpec> & controllers,
+    std::vector<std::string> & deactivate_request, std::vector<std::string> & activate_request,
+    std::vector<std::string> & to_chained_mode_request,
+    std::vector<std::string> & from_chained_mode_request) const;
 
   /**
    * @brief Inserts a controller into an ordered list based on dependencies to compute the
