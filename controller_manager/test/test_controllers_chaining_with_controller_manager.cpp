@@ -1198,13 +1198,13 @@ TEST_P(
     std::future_status::timeout);
 
   // Expect all controllers to be active
-  EXPECT_EQ(
+  ASSERT_EQ(
     lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE, pid_left_wheel_controller->get_state().id());
-  EXPECT_EQ(
+  ASSERT_EQ(
     lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE, pid_right_wheel_controller->get_state().id());
-  EXPECT_EQ(
+  ASSERT_EQ(
     lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE, diff_drive_controller->get_state().id());
-  EXPECT_EQ(
+  ASSERT_EQ(
     lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE,
     position_tracking_controller->get_state().id());
 
@@ -1412,13 +1412,13 @@ TEST_P(TestControllerChainingWithControllerManager, test_chained_controllers_res
       POSITION_CONTROLLER_NOT_CLAIMED_INTERFACES);
 
     // Verify that only the restart controller has its activate and deactivate calls incremented.
-    EXPECT_EQ(2u, pid_left_wheel_controller->activate_calls);       // +0
-    EXPECT_EQ(2u, pid_right_wheel_controller->activate_calls);      // +0
-    EXPECT_EQ(2u, diff_drive_controller->activate_calls);           // +0
+    ASSERT_EQ(2u, pid_left_wheel_controller->activate_calls);       // +0
+    ASSERT_EQ(2u, pid_right_wheel_controller->activate_calls);      // +0
+    ASSERT_EQ(2u, diff_drive_controller->activate_calls);           // +0
     ASSERT_EQ(2u, position_tracking_controller->activate_calls);    // +1 (restart)
-    EXPECT_EQ(1u, pid_left_wheel_controller->deactivate_calls);     // +0
-    EXPECT_EQ(1u, pid_right_wheel_controller->deactivate_calls);    // +0
-    EXPECT_EQ(1u, diff_drive_controller->deactivate_calls);         // +0
+    ASSERT_EQ(1u, pid_left_wheel_controller->deactivate_calls);     // +0
+    ASSERT_EQ(1u, pid_right_wheel_controller->deactivate_calls);    // +0
+    ASSERT_EQ(1u, diff_drive_controller->deactivate_calls);         // +0
     ASSERT_EQ(1u, position_tracking_controller->deactivate_calls);  // +1 (restart)
 
     // Verify that the controllers are still in the same chained mode
@@ -1487,12 +1487,12 @@ TEST_P(TestControllerChainingWithControllerManager, test_chained_controllers_res
 
     // Verify that the activate and deactivate calls for diff_drive_controller are incremented,
     // and only the deactivate count for position_tracking_controller is incremented.
-    EXPECT_EQ(3u, pid_left_wheel_controller->activate_calls);       // +0
-    EXPECT_EQ(3u, pid_right_wheel_controller->activate_calls);      // +0
+    ASSERT_EQ(3u, pid_left_wheel_controller->activate_calls);       // +0
+    ASSERT_EQ(3u, pid_right_wheel_controller->activate_calls);      // +0
     ASSERT_EQ(4u, diff_drive_controller->activate_calls);           // +1 (restart)
-    EXPECT_EQ(3u, position_tracking_controller->activate_calls);    // +0
-    EXPECT_EQ(2u, pid_left_wheel_controller->deactivate_calls);     // +0
-    EXPECT_EQ(2u, pid_right_wheel_controller->deactivate_calls);    // +0
+    ASSERT_EQ(3u, position_tracking_controller->activate_calls);    // +0
+    ASSERT_EQ(2u, pid_left_wheel_controller->deactivate_calls);     // +0
+    ASSERT_EQ(2u, pid_right_wheel_controller->deactivate_calls);    // +0
     ASSERT_EQ(3u, diff_drive_controller->deactivate_calls);         // +1 (restart)
     ASSERT_EQ(3u, position_tracking_controller->deactivate_calls);  // +1 (deactivate)
 
@@ -1517,14 +1517,14 @@ TEST_P(TestControllerChainingWithControllerManager, test_chained_controllers_res
         POSITION_CONTROLLER_NOT_CLAIMED_INTERFACES, POSITION_CONTROLLER_CLAIMED_INTERFACES));
 
     // Verify that only the restart controller has its activate and deactivate calls incremented.
-    EXPECT_EQ(3u, pid_left_wheel_controller->activate_calls);       // +0
+    ASSERT_EQ(3u, pid_left_wheel_controller->activate_calls);       // +0
     ASSERT_EQ(4u, pid_right_wheel_controller->activate_calls);      // +1 (restart)
     ASSERT_EQ(5u, diff_drive_controller->activate_calls);           // +1 (restart)
-    EXPECT_EQ(3u, position_tracking_controller->activate_calls);    // +0
-    EXPECT_EQ(2u, pid_left_wheel_controller->deactivate_calls);     // +0
+    ASSERT_EQ(3u, position_tracking_controller->activate_calls);    // +0
+    ASSERT_EQ(2u, pid_left_wheel_controller->deactivate_calls);     // +0
     ASSERT_EQ(3u, pid_right_wheel_controller->deactivate_calls);    // +1 (restart)
     ASSERT_EQ(4u, diff_drive_controller->deactivate_calls);         // +1 (restart)
-    EXPECT_EQ(3u, position_tracking_controller->deactivate_calls);  // +0
+    ASSERT_EQ(3u, position_tracking_controller->deactivate_calls);  // +0
 
     // Verify that the controllers are still in the same chained mode
     ASSERT_TRUE(pid_left_wheel_controller->is_in_chained_mode());
@@ -1550,14 +1550,14 @@ TEST_P(TestControllerChainingWithControllerManager, test_chained_controllers_res
 
     // Verify that the activate and deactivate calls for diff_drive_controller are incremented,
     // and only the deactivate count for position_tracking_controller is incremented.
-    EXPECT_EQ(3u, pid_left_wheel_controller->activate_calls);       // +0
-    EXPECT_EQ(4u, pid_right_wheel_controller->activate_calls);      // +0
+    ASSERT_EQ(3u, pid_left_wheel_controller->activate_calls);       // +0
+    ASSERT_EQ(4u, pid_right_wheel_controller->activate_calls);      // +0
     ASSERT_EQ(6u, diff_drive_controller->activate_calls);           // +1 (restart)
     ASSERT_EQ(4u, position_tracking_controller->activate_calls);    // +1 (activate)
-    EXPECT_EQ(2u, pid_left_wheel_controller->deactivate_calls);     // +0
-    EXPECT_EQ(3u, pid_right_wheel_controller->deactivate_calls);    // +0
+    ASSERT_EQ(2u, pid_left_wheel_controller->deactivate_calls);     // +0
+    ASSERT_EQ(3u, pid_right_wheel_controller->deactivate_calls);    // +0
     ASSERT_EQ(5u, diff_drive_controller->deactivate_calls);         // +1 (restart)
-    EXPECT_EQ(3u, position_tracking_controller->deactivate_calls);  // +0
+    ASSERT_EQ(3u, position_tracking_controller->deactivate_calls);  // +0
 
     // Verify that the diff_drive_controller is in chained mode
     ASSERT_TRUE(pid_left_wheel_controller->is_in_chained_mode());
@@ -1591,14 +1591,14 @@ TEST_P(
       POSITION_CONTROLLER_NOT_CLAIMED_INTERFACES);
 
     // Verify activate and deactivate calls are not changed
-    EXPECT_EQ(2u, pid_left_wheel_controller->activate_calls);       // +0
-    EXPECT_EQ(2u, pid_right_wheel_controller->activate_calls);      // +0
-    EXPECT_EQ(2u, diff_drive_controller->activate_calls);           // +0
-    EXPECT_EQ(1u, position_tracking_controller->activate_calls);    // +0
-    EXPECT_EQ(1u, pid_left_wheel_controller->deactivate_calls);     // +0
-    EXPECT_EQ(1u, pid_right_wheel_controller->deactivate_calls);    // +0
-    EXPECT_EQ(1u, diff_drive_controller->deactivate_calls);         // +0
-    EXPECT_EQ(0u, position_tracking_controller->deactivate_calls);  // +0
+    ASSERT_EQ(2u, pid_left_wheel_controller->activate_calls);       // +0
+    ASSERT_EQ(2u, pid_right_wheel_controller->activate_calls);      // +0
+    ASSERT_EQ(2u, diff_drive_controller->activate_calls);           // +0
+    ASSERT_EQ(1u, position_tracking_controller->activate_calls);    // +0
+    ASSERT_EQ(1u, pid_left_wheel_controller->deactivate_calls);     // +0
+    ASSERT_EQ(1u, pid_right_wheel_controller->deactivate_calls);    // +0
+    ASSERT_EQ(1u, diff_drive_controller->deactivate_calls);         // +0
+    ASSERT_EQ(0u, position_tracking_controller->deactivate_calls);  // +0
 
     // Verify that the controllers are still in the same chained mode
     ASSERT_TRUE(pid_left_wheel_controller->is_in_chained_mode());
@@ -1623,13 +1623,13 @@ TEST_P(
 
     // Verify that only the restart position_tracking_controller  has its activate and deactivate
     // calls incremented.
-    EXPECT_EQ(2u, pid_left_wheel_controller->activate_calls);       // +0
-    EXPECT_EQ(2u, pid_right_wheel_controller->activate_calls);      // +0
-    EXPECT_EQ(2u, diff_drive_controller->activate_calls);           // +0
+    ASSERT_EQ(2u, pid_left_wheel_controller->activate_calls);       // +0
+    ASSERT_EQ(2u, pid_right_wheel_controller->activate_calls);      // +0
+    ASSERT_EQ(2u, diff_drive_controller->activate_calls);           // +0
     ASSERT_EQ(2u, position_tracking_controller->activate_calls);    // +1 (restart)
-    EXPECT_EQ(1u, pid_left_wheel_controller->deactivate_calls);     // +0
-    EXPECT_EQ(1u, pid_right_wheel_controller->deactivate_calls);    // +0
-    EXPECT_EQ(1u, diff_drive_controller->deactivate_calls);         // +0
+    ASSERT_EQ(1u, pid_left_wheel_controller->deactivate_calls);     // +0
+    ASSERT_EQ(1u, pid_right_wheel_controller->deactivate_calls);    // +0
+    ASSERT_EQ(1u, diff_drive_controller->deactivate_calls);         // +0
     ASSERT_EQ(1u, position_tracking_controller->deactivate_calls);  // +1 (restart)
 
     // Verify that the controllers are still in the same chained mode
