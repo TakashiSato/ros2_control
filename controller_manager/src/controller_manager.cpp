@@ -241,53 +241,10 @@ ActivationState get_activation_state(
   return state;
 }
 
-std::vector<std::reference_wrapper<const controller_manager::ControllerSpec>>
-list_following_controllers(
-  const controller_manager::ControllerSpec & controller, const bool is_active,
-  const bool is_inactive, const std::vector<controller_manager::ControllerSpec> & controllers)
-{
-  // If the controller is neither active nor inactive (in which case it is likely either
-  // unconfigured or finalized), it is impossible to retrieve the command_interface configuration,
-  // so return an empty vector
-  if (!is_active && !is_inactive)
-  {
-    return {};
-  }
-
-  std::vector<std::reference_wrapper<const controller_manager::ControllerSpec>> following_ctrl_refs;
-  for (const auto & cmd_itf_name : controller.c->command_interface_configuration().names)
-  {
-    // controller that 'cmd_tf_name' belongs to
-    controller_manager::ControllersListIterator following_ctrl_it;
-    if (!command_interface_is_reference_interface_of_controller(
-          cmd_itf_name, controllers, following_ctrl_it))
-    {
-      // interfaces that are not related to the chain do not need to be checked
-      continue;
-    }
-
-    // check if the controller is already in the list
-    if (
-      std::find_if(
-        following_ctrl_refs.begin(), following_ctrl_refs.end(),
-        [&](const auto & ctrl) { return ctrl.get().info.name == following_ctrl_it->info.name; }) ==
-      following_ctrl_refs.end())
-    {
-      following_ctrl_refs.push_back(std::cref(*following_ctrl_it));
-    }
-  }
-
-  return following_ctrl_refs;
-}
-
-using ControllersMap = std::unordered_map<std::string, const controller_manager::ControllerSpec &>;
-using ControllerChainSpecsMap =
-  std::unordered_map<std::string, controller_manager::ControllerChainSpec>;
-
-ControllersMap create_controllers_map(
+controller_manager::ControllersMap create_controllers_map(
   const std::vector<controller_manager::ControllerSpec> & controllers)
 {
-  ControllersMap controllers_map;
+  controller_manager::ControllersMap controllers_map;
   for (const auto & controller : controllers)
   {
     controllers_map.insert({controller.info.name, controller});
@@ -297,7 +254,8 @@ ControllersMap create_controllers_map(
 
 bool can_controller_activate(
   const rclcpp::Logger & logger, const std::string & controller_name,
-  const ControllersMap & controllers_map, const ControllerChainSpecsMap & chain_specs_map,
+  const controller_manager::ControllersMap & controllers_map,
+  const controller_manager::ControllerChainSpecsMap & chain_specs_map,
   const std::vector<std::string> & deactivate_request,
   const std::vector<std::string> & activate_request)
 {
@@ -352,7 +310,8 @@ bool can_controller_activate(
 
 bool can_controller_deactivate(
   const rclcpp::Logger & logger, const std::string & controller_name,
-  const ControllersMap & controllers_map, const ControllerChainSpecsMap & chain_specs_map,
+  const controller_manager::ControllersMap & controllers_map,
+  const controller_manager::ControllerChainSpecsMap & chain_specs_map,
   const std::vector<std::string> & deactivate_request,
   const std::vector<std::string> & activate_request)
 {
@@ -396,7 +355,8 @@ bool can_controller_deactivate(
 
 bool can_controller_restart(
   const rclcpp::Logger & logger, const std::string & controller_name,
-  const ControllersMap & controllers_map, const ControllerChainSpecsMap & chain_specs_map,
+  const controller_manager::ControllersMap & controllers_map,
+  const controller_manager::ControllerChainSpecsMap & chain_specs_map,
   const std::vector<std::string> & deactivate_request,
   const std::vector<std::string> & activate_request)
 {
@@ -440,7 +400,7 @@ bool can_controller_restart(
   return true;
 }
 
-controller_interface::return_type check_de_activate_request_conflict_for_controller(
+controller_interface::return_type check_controller_for_de_activate(
   const rclcpp::Logger & logger, const int strictness,
   const controller_manager::ControllerSpec & controller,
   std::vector<std::string> & deactivate_request, std::vector<std::string> & activate_request)
@@ -460,7 +420,7 @@ controller_interface::return_type check_de_activate_request_conflict_for_control
     ctrl_state.in_deactivate_list = false;
   }
 
-  // check for doubled activation
+  // check for double activation
   if (ctrl_state.is_active && !ctrl_state.in_deactivate_list && ctrl_state.in_activate_list)
   {
     if (!handle_conflict(
@@ -1384,14 +1344,15 @@ controller_interface::return_type ControllerManager::switch_controller(
 
   const std::vector<ControllerSpec> & controllers = rt_controllers_wrapper_.get_updated_list(guard);
 
+  // create a map of controllers for easy access for the following processing
+  const auto controllers_map = create_controllers_map(controllers);
+
   // Check for conflicts with the (de)activate request. If conflicts are detected, handle them by
-  // either raising an error (STRICT) or removing the conflicting controller from the request
-  // (BEST_EFFORT).
-  // Simultaneously, if the (de)activate request necessitates switching the chained mode of the
-  // following controller, make the corresponding 'from'/'to' chained mode request.
+  // either raising an error (STRICT) or removing the conflicting controller from the (de)activate
+  // request (BEST_EFFORT).
   if (
-    check_de_activate_request_conflict(
-      strictness, controllers, deactivate_request_, activate_request_) !=
+    check_controllers_for_de_activate(
+      strictness, controllers, controllers_map, deactivate_request_, activate_request_) !=
     controller_interface::return_type::OK)
   {
     RCLCPP_ERROR(get_logger(), "Aborting, no controller is switched! (::STRICT switch)");
@@ -1400,13 +1361,16 @@ controller_interface::return_type ControllerManager::switch_controller(
     return controller_interface::return_type::ERROR;
   }
 
+  // if the (de)activate request necessitates switching the chained mode of the
+  // following controller, make the corresponding 'from'/'to' chained mode
+  // request.
   create_from_to_chained_mode_request(
-    controllers, deactivate_request_, activate_request_, from_chained_mode_request_,
-    to_chained_mode_request_);
+    controllers, controllers_map, deactivate_request_, activate_request_,
+    from_chained_mode_request_, to_chained_mode_request_);
 
-  // To ensure that the appropriate (de)activation are performed, sort deactivate requests in
-  // the order of preceding to following, and sort activate requests in the reverse order of
-  // following to preceding
+  // In manage_switch, deactivation needs to be performed in the order of preceding, following, and
+  // activation needs to be performed in the reverse order of following, preceding. Therefore, the
+  // (de)activate requests are sorted in advance here.
   sort_list_by_another(deactivate_request_, ordered_controllers_names_, false);
   sort_list_by_another(activate_request_, ordered_controllers_names_, true);
 
@@ -2666,8 +2630,9 @@ void ControllerManager::cache_controller_interfaces_in_activate_request(
   }
 };
 
-controller_interface::return_type ControllerManager::check_de_activate_request_conflict(
+controller_interface::return_type ControllerManager::check_controllers_for_de_activate(
   const int strictness, const std::vector<controller_manager::ControllerSpec> & controllers,
+  const controller_manager::ControllersMap & controllers_map,
   std::vector<std::string> & deactivate_request, std::vector<std::string> & activate_request) const
 {
   // check if there are controllers to (de)activate
@@ -2677,12 +2642,11 @@ controller_interface::return_type ControllerManager::check_de_activate_request_c
     return controller_interface::return_type::OK;
   }
 
-  // Check for conflict in the order of "preceding" to "following"
+  // check for conflicts of (de)activate requests for controllers
   for (const auto & controller : controllers)
   {
-    // check for conflict of (de)activate request for the controller
     if (
-      check_de_activate_request_conflict_for_controller(
+      check_controller_for_de_activate(
         get_logger(), strictness, controller, deactivate_request, activate_request) !=
       controller_interface::return_type::OK)
     {
@@ -2690,46 +2654,52 @@ controller_interface::return_type ControllerManager::check_de_activate_request_c
     }
   }
 
-  // create a map of controllers for easy access
-  const auto controllers_map = create_controllers_map(controllers);
+  // NOTE: If the value of strictness is BEST_EFFORT, the following invalid requests will be removed
+  // by the above function (check_controller_for_de_activate), and their existence will not be
+  // considered in subsequent processing:
+  // - Deactivate a controller that is already inactive: (double stop)
+  // - Activate a controller that is already active: (double activation)
+  // - Executing (de)activate from a state other than active/inactive (unconfigured/finalized):
+  // (illegal activation)
 
   // Check for conflict in the order of "preceding" to "following"
   // Note: If the order of controllers is not sorted in the sequence of preceding -> following, the
   // subsequent processes will not function properly.
   for (const auto & controller : controllers)
   {
-    auto controller_state = get_activation_state(controller, deactivate_request, activate_request);
+    const auto controller_state =
+      get_activation_state(controller, deactivate_request, activate_request);
 
-    // if the controller is included in both the deactivate list and the activate list, check if a
-    // restart is possible.
-    if (controller_state.in_deactivate_list && controller_state.in_activate_list)
-    {
-      // if no conflict is found in the restart request, further checks are unnecessary, so proceed
-      // to the next controller.
-      if (can_controller_restart(
-            get_logger(), controller.info.name, controllers_map, controller_chain_spec_,
-            deactivate_request, activate_request))
-      {
-        continue;
-      }
-
-      // if a conflict is found, erase the activate request from the restart request, and then check
-      // if only deactivation is possible. (if BEST_EFFORT)
-      if (!handle_conflict(
-            strictness, get_logger(),
-            "The restart request for controller '" + controller.info.name +
-              "' was rejected due to conflict"))
-      {
-        return controller_interface::return_type::ERROR;
-      }
-
-      remove_element_from_list(activate_request, controller.info.name);
-      controller_state.in_activate_list = false;
-    }
-
-    // check for conflict of deactivate request for the controller
     if (controller_state.in_deactivate_list)
     {
+      // if the controller is included in both the deactivate list and the activate list, check if a
+      // restart is possible.
+      if (controller_state.in_activate_list)
+      {
+        if (can_controller_restart(
+              get_logger(), controller.info.name, controllers_map, controller_chain_spec_,
+              deactivate_request, activate_request))
+        {
+          // if no conflict is found in the restart request, further checks are unnecessary, so
+          // proceed to the next controller.
+          continue;
+        }
+
+        // if a conflict is found, erase the activate request, and then check if only deactivation
+        // is possible. (if BEST_EFFORT)
+        if (!handle_conflict(
+              strictness, get_logger(),
+              "The restart request for controller '" + controller.info.name +
+                "' was rejected due to conflict"))
+        {
+          return controller_interface::return_type::ERROR;
+        }
+
+        remove_element_from_list(activate_request, controller.info.name);
+      }
+
+      // if it is included only in the deactivate list, check for conflicts in the deactivate
+      // request for the controller.
       if (!can_controller_deactivate(
             get_logger(), controller.info.name, controllers_map, controller_chain_spec_,
             deactivate_request, activate_request))
@@ -2743,13 +2713,12 @@ controller_interface::return_type ControllerManager::check_de_activate_request_c
         }
 
         remove_element_from_list(deactivate_request, controller.info.name);
-        controller_state.in_deactivate_list = false;
       }
     }
-
-    // check for conflict of activate request for the controller
-    if (controller_state.in_activate_list)
+    else if (controller_state.in_activate_list)
     {
+      // if it is included only in the activate list, check for conflicts in the activate request
+      // for the controller.
       if (!can_controller_activate(
             get_logger(), controller.info.name, controllers_map, controller_chain_spec_,
             deactivate_request, activate_request))
@@ -2763,8 +2732,11 @@ controller_interface::return_type ControllerManager::check_de_activate_request_c
         }
 
         remove_element_from_list(activate_request, controller.info.name);
-        controller_state.in_activate_list = false;
       }
+    }
+    else
+    {
+      // this controller does not have any (de)activate request --> do nothing
     }
   }
 
@@ -2773,46 +2745,42 @@ controller_interface::return_type ControllerManager::check_de_activate_request_c
 
 void ControllerManager::create_from_to_chained_mode_request(
   const std::vector<controller_manager::ControllerSpec> & controllers,
+  const controller_manager::ControllersMap & controllers_map,
   std::vector<std::string> & deactivate_request, std::vector<std::string> & activate_request,
   std::vector<std::string> & from_chained_mode_request,
   std::vector<std::string> & to_chained_mode_request) const
 {
-  // Check for conflict in the order of "preceding" to "following"
+  // Check all preceding and following controller
   // Note: If the order of controllers is not sorted in the sequence of preceding -> following,
   // the subsequent processes will not function properly.
   for (const auto & controller : controllers)
   {
-    const auto controller_state =
-      get_activation_state(controller, deactivate_request, activate_request);
-
-    // get following controllers references for the controller
-    const auto following_ctrl_refs = list_following_controllers(
-      controller, controller_state.is_active, controller_state.is_inactive, controllers);
+    const auto & chain_spec = controller_chain_spec_.at(controller.info.name);
 
     // if there are no following controllers, this controller is not a preceding controller, so
     // skip the following checks
-    if (following_ctrl_refs.empty())
+    if (chain_spec.following_controllers.empty())
     {
       continue;
     }
 
     // this controller is a preceding controller
     const auto & preceding_ctrl = controller;
-    const auto & preceding_state = controller_state;
+    const auto preceding_state =
+      get_activation_state(preceding_ctrl, deactivate_request, activate_request);
 
     // check for conflict of the preceding and each following controller
-    for (const auto & following_ctrl_ref : following_ctrl_refs)
+    for (const auto & following_controller_name : chain_spec.following_controllers)
     {
-      const auto & following_ctrl = following_ctrl_ref.get();
+      const auto & following_ctrl = controllers_map.at(following_controller_name);
 
       const auto following_state =
         get_activation_state(following_ctrl, deactivate_request, activate_request);
 
-      // If no conflicts are found in the (de)activate request, determine if a change chained mode
-      // is necessary for the following controllers based on the request, and add them to
-      // the chained mode request if necessary. Additionally, if only preceding performs the
-      // activation state transition, a restart of the following controller is necessary to
-      // switch the chained mode, so add them to the (de)activate request.
+      // determine if a change chained mode is necessary for the following controllers based on the
+      // request, and add them to the chained mode request if necessary. Additionally, if only
+      // preceding performs the activation state transition, a restart of the following controller
+      // is necessary to switch the chained mode, so add them to the (de)activate request.
       update_chained_mode_request_of_following(
         get_logger(), preceding_ctrl, following_ctrl, preceding_state, following_state,
         deactivate_request, activate_request, from_chained_mode_request, to_chained_mode_request,
