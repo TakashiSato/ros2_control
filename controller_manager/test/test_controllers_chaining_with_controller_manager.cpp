@@ -855,6 +855,7 @@ TEST_P(
 
   // Test Case 1: Trying to activate a preceding controller when following controller
   // is not activated --> return error (If STRICT); Preceding controller is still inactive.
+
   static std::unordered_map<int32_t, ExpectedBehaviorStruct> expected = {
     {controller_manager_msgs::srv::SwitchController::Request::STRICT,
      {controller_interface::return_type::ERROR, std::future_status::ready,
@@ -1158,6 +1159,7 @@ TEST_P(
 
   // Test Case 6: following controller is deactivated but preceding controller will be activated
   // --> return error; controllers stay in the same state
+
   switch_test_controllers(
     {DIFF_DRIVE_CONTROLLER}, {PID_LEFT_WHEEL, PID_RIGHT_WHEEL}, test_param.strictness,
     expected.at(test_param.strictness).future_status,
@@ -1734,5 +1736,4 @@ TEST_P(TestControllerChainingWithControllerManager, test_chained_controllers_res
 
 INSTANTIATE_TEST_SUITE_P(
   test_strict_best_effort, TestControllerChainingWithControllerManager,
-  testing::Values(strict, best_effort), [](const testing::TestParamInfo<Strictness> & info_)
-  { return info_.param.strictness == STRICT ? "STRICT" : "BEST_EFFORT"; });
+  testing::Values(strict, best_effort));
