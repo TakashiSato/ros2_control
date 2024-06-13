@@ -14,7 +14,6 @@
 
 #include "controller_manager/controller_manager.hpp"
 
-#include <functional>
 #include <list>
 #include <memory>
 #include <string>
@@ -1193,79 +1192,46 @@ controller_interface::return_type ControllerManager::switch_controller(
   const std::vector<std::string> & deactivate_controllers, int strictness, bool activate_asap,
   const rclcpp::Duration & timeout)
 {
-  const auto show_list = [this](const std::string & tag)
-  {
-    RCLCPP_WARN(get_logger(), "[%s]----------------", tag.c_str());
-    RCLCPP_WARN(get_logger(), "Activating controllers:");
-    for (const auto & controller : activate_request_)
-    {
-      RCLCPP_WARN(get_logger(), " - %s", controller.c_str());
-    }
-    RCLCPP_WARN(get_logger(), "Deactivating controllers:");
-    for (const auto & controller : deactivate_request_)
-    {
-      RCLCPP_WARN(get_logger(), " - %s", controller.c_str());
-    }
-    RCLCPP_WARN(get_logger(), "to chained mode:");
-    for (const auto & req : to_chained_mode_request_)
-    {
-      RCLCPP_WARN(get_logger(), " - %s", req.c_str());
-    }
-    RCLCPP_WARN(get_logger(), "from chained mode:");
-    for (const auto & req : from_chained_mode_request_)
-    {
-      RCLCPP_WARN(get_logger(), " - %s", req.c_str());
-    }
-    RCLCPP_WARN(get_logger(), "----------------");
-  };
-
-  RCLCPP_WARN(get_logger(), "STRICTNESS: %d", strictness);
-
   switch_params_ = SwitchParams();
 
-  const auto check_request_and_internal_state_before_switch = [this, &strictness]()
+  // check (de)activate request and internal state before switch
+  if (!deactivate_request_.empty() || !activate_request_.empty())
   {
-    if (!deactivate_request_.empty() || !activate_request_.empty())
-    {
-      RCLCPP_FATAL(
-        get_logger(),
-        "The internal deactivate and activate request lists are not empty at the beginning of the "
-        "switch_controller() call. This should never happen.");
-      throw std::runtime_error("CM's internal state is not correct. See the FATAL message above.");
-    }
-    if (
-      !deactivate_command_interface_request_.empty() ||
-      !activate_command_interface_request_.empty())
-    {
-      RCLCPP_FATAL(
-        get_logger(),
-        "The internal deactivate and activate requests command interface lists are not empty at "
-        "the "
-        "switch_controller() call. This should never happen.");
-      throw std::runtime_error("CM's internal state is not correct. See the FATAL message above.");
-    }
-    if (!from_chained_mode_request_.empty() || !to_chained_mode_request_.empty())
-    {
-      RCLCPP_FATAL(
-        get_logger(),
-        "The internal 'from' and 'to' chained mode requests are not empty at the "
-        "switch_controller() call. This should never happen.");
-      throw std::runtime_error("CM's internal state is not correct. See the FATAL message above.");
-    }
-    if (strictness == 0)
-    {
-      RCLCPP_WARN(
-        get_logger(),
-        "Controller Manager: to switch controllers you need to specify a "
-        "strictness level of controller_manager_msgs::SwitchController::STRICT "
-        "(%d) or ::BEST_EFFORT (%d). Defaulting to ::BEST_EFFORT",
-        controller_manager_msgs::srv::SwitchController::Request::STRICT,
-        controller_manager_msgs::srv::SwitchController::Request::BEST_EFFORT);
-      strictness = controller_manager_msgs::srv::SwitchController::Request::BEST_EFFORT;
-    }
-  };
-
-  check_request_and_internal_state_before_switch();
+    RCLCPP_FATAL(
+      get_logger(),
+      "The internal deactivate and activate request lists are not empty at the beginning of the "
+      "switch_controller() call. This should never happen.");
+    throw std::runtime_error("CM's internal state is not correct. See the FATAL message above.");
+  }
+  if (
+    !deactivate_command_interface_request_.empty() || !activate_command_interface_request_.empty())
+  {
+    RCLCPP_FATAL(
+      get_logger(),
+      "The internal deactivate and activate requests command interface lists are not empty at "
+      "the "
+      "switch_controller() call. This should never happen.");
+    throw std::runtime_error("CM's internal state is not correct. See the FATAL message above.");
+  }
+  if (!from_chained_mode_request_.empty() || !to_chained_mode_request_.empty())
+  {
+    RCLCPP_FATAL(
+      get_logger(),
+      "The internal 'from' and 'to' chained mode requests are not empty at the "
+      "switch_controller() call. This should never happen.");
+    throw std::runtime_error("CM's internal state is not correct. See the FATAL message above.");
+  }
+  if (strictness == 0)
+  {
+    RCLCPP_WARN(
+      get_logger(),
+      "Controller Manager: to switch controllers you need to specify a "
+      "strictness level of controller_manager_msgs::SwitchController::STRICT "
+      "(%d) or ::BEST_EFFORT (%d). Defaulting to ::BEST_EFFORT",
+      controller_manager_msgs::srv::SwitchController::Request::STRICT,
+      controller_manager_msgs::srv::SwitchController::Request::BEST_EFFORT);
+    strictness = controller_manager_msgs::srv::SwitchController::Request::BEST_EFFORT;
+  }
 
   RCLCPP_DEBUG(get_logger(), "Activating controllers:");
   for (const auto & controller : activate_controllers)
@@ -1337,8 +1303,6 @@ controller_interface::return_type ControllerManager::switch_controller(
     return ret;
   }
 
-  show_list("REQUEST");
-
   // lock controllers
   std::lock_guard<std::recursive_mutex> guard(rt_controllers_wrapper_.controllers_lock_);
 
@@ -1373,8 +1337,6 @@ controller_interface::return_type ControllerManager::switch_controller(
   // (de)activate requests are sorted in advance here.
   sort_list_by_another(deactivate_request_, ordered_controllers_names_, false);
   sort_list_by_another(activate_request_, ordered_controllers_names_, true);
-
-  show_list("AFTER CHECK");
 
   // check if we need to request switch controllers after all the checks
   if (activate_request_.empty() && deactivate_request_.empty())
@@ -1436,15 +1398,8 @@ controller_interface::return_type ControllerManager::switch_controller(
 
   // wait until switch is finished
   RCLCPP_DEBUG(get_logger(), "Requested atomic controller switch from realtime loop");
-  int timeout_count = 0;
   while (rclcpp::ok() && switch_params_.do_switch)
   {
-    if (++timeout_count > 3000)
-    {
-      RCLCPP_ERROR(get_logger(), "Timeout while waiting for atomic controller switch to finish");
-      clear_requests();
-      return controller_interface::return_type::ERROR;
-    }
     if (!rclcpp::ok())
     {
       return controller_interface::return_type::ERROR;
@@ -1589,25 +1544,19 @@ void ControllerManager::deactivate_controllers(
     {
       try
       {
-        RCLCPP_WARN(
-          get_logger(), "Deactivating controller '%s' with state '%s'", controller_name.c_str(),
-          controller->get_node()->get_current_state().label().c_str());
-
         const auto new_state = controller->get_node()->deactivate();
-
-        RCLCPP_WARN(get_logger(), "Release interfaces of controller '%s'", controller_name.c_str());
         controller->release_interfaces();
 
-        // if it is a chainable controller and will not be activated asap, make the reference
-        // interfaces unavailable on deactivation
-        const bool will_be_activated =
-          std::find(activate_request_.begin(), activate_request_.end(), controller_name) !=
-          activate_request_.end();
-        if (controller->is_chainable() && !will_be_activated)
+        // If it is a chainable controller, make the reference interfaces unavailable on
+        // deactivation.
+        // However, if it will be activated asap for a restart due to subsequent processes in
+        // manage_switch, the reference_interface needs to remain available to ensure the success of
+        // the switch_chained_mode process, so this case is an exception.
+        const bool will_be_restarted_asap = switch_params_.do_switch &&
+                                            switch_params_.activate_asap &&
+                                            is_element_in_list(activate_request_, controller_name);
+        if (controller->is_chainable() && !will_be_restarted_asap)
         {
-          RCLCPP_WARN(
-            get_logger(), "Release reference interfaces of controller '%s'",
-            controller_name.c_str());
           resource_manager_->make_controller_reference_interfaces_unavailable(controller_name);
         }
         if (new_state.id() != lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE)
