@@ -381,9 +381,13 @@ private:
    * \returns return_type::OK if all (de)activate requests pass the checks, otherwise
    * return_type::ERROR.
    */
-  controller_interface::return_type
-  check_de_activate_request_conflict_and_create_chained_mode_request(
-    const int strictness, const std::vector<ControllerSpec> & controllers,
+  controller_interface::return_type check_de_activate_request_conflict(
+    const int strictness, const std::vector<controller_manager::ControllerSpec> & controllers,
+    std::vector<std::string> & deactivate_request,
+    std::vector<std::string> & activate_request) const;
+
+  void create_from_to_chained_mode_request(
+    const std::vector<controller_manager::ControllerSpec> & controllers,
     std::vector<std::string> & deactivate_request, std::vector<std::string> & activate_request,
     std::vector<std::string> & from_chained_mode_request,
     std::vector<std::string> & to_chained_mode_request) const;
@@ -393,8 +397,8 @@ private:
    * controller chain.
    *
    * This method computes the controller chain by inserting the provided controller name into an
-   * ordered list of controllers based on dependencies. It ensures that controllers are inserted in
-   * the correct order so that dependencies are satisfied.
+   * ordered list of controllers based on dependencies. It ensures that controllers are inserted
+   * in the correct order so that dependencies are satisfied.
    *
    * @param ctrl_name The name of the controller to be inserted into the chain.
    * @param controller_iterator An iterator pointing to the position in the ordered list where the
