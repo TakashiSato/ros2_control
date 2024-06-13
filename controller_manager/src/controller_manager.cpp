@@ -1208,8 +1208,7 @@ controller_interface::return_type ControllerManager::switch_controller(
   {
     RCLCPP_FATAL(
       get_logger(),
-      "The internal deactivate and activate requests command interface lists are not empty at "
-      "the "
+      "The internal deactivate and activate requests command interface lists are not empty at the "
       "switch_controller() call. This should never happen.");
     throw std::runtime_error("CM's internal state is not correct. See the FATAL message above.");
   }
@@ -1648,10 +1647,6 @@ void ControllerManager::activate_controllers(
       continue;
     }
 
-    RCLCPP_WARN(
-      get_logger(), "Activating controller '%s' with state '%s'", controller_name.c_str(),
-      found_it->c->get_node()->get_current_state().label().c_str());
-
     auto controller = found_it->c;
     // reset the next update cycle time for newly activated controllers
     *found_it->next_update_cycle_time =
@@ -1687,9 +1682,6 @@ void ControllerManager::activate_controllers(
       }
       try
       {
-        RCLCPP_WARN(
-          get_logger(), "Claiming command interface '%s' for controller '%s'",
-          command_interface.c_str(), controller_name.c_str());
         command_loans.emplace_back(resource_manager_->claim_command_interface(command_interface));
       }
       catch (const std::exception & e)
@@ -2184,8 +2176,7 @@ void ControllerManager::set_hardware_component_state_srv_cb(
   {
     rclcpp_lifecycle::State target_state(
       request->target_state.id,
-      // the ternary operator is needed because label in State constructor cannot be an empty
-      // string
+      // the ternary operator is needed because label in State constructor cannot be an empty string
       request->target_state.label.empty() ? "-" : request->target_state.label);
     response->ok =
       (resource_manager_->set_component_state(request->name, target_state) ==
@@ -2252,9 +2243,13 @@ void ControllerManager::manage_switch()
 
   deactivate_controllers(rt_controller_list, deactivate_request_);
 
-  // When the same interface is specified for both 'from' and 'to' during a controller restart, it
+  // When the same controller is specified for both 'from' and 'to' for restarting a controller, it
   // is necessary to switch in the order 'from' then 'to', in order to disable the chained mode
   // once and then enable it again.
+
+  // When the same controller is specified for both 'from' and 'to' during a restart, it is
+  // necessary to switch in the sequence of 'from' then 'to' to temporarily disable and then
+  // re-enable the chained mode.
   switch_chained_mode(from_chained_mode_request_, false);
   switch_chained_mode(to_chained_mode_request_, true);
 
