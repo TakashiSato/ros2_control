@@ -804,13 +804,11 @@ TEST_P(
     lifecycle_msgs::msg::State::PRIMARY_STATE_INACTIVE, diff_drive_controller->get_state().id());
 
   // TODO: BUG1 ------------------------------------------
-#if 0
   // Check if the controllers are not in chained mode
   ASSERT_FALSE(
     pid_left_wheel_controller->is_in_chained_mode());  // should be not in chained mode but is in
   ASSERT_FALSE(pid_right_wheel_controller->is_in_chained_mode());
   ASSERT_FALSE(diff_drive_controller->is_in_chained_mode());
-#endif
   // TODO: /BUG1 ------------------------------------------
 }
 
@@ -848,8 +846,8 @@ TEST_P(TestControllerChainingWithControllerManager, test_chained_controllers_act
   EXPECT_FALSE(pid_right_wheel_controller->is_in_chained_mode());
   ASSERT_FALSE(diff_drive_controller->is_in_chained_mode());
 
-  // Test Case 3: Trying to activate a preceding controllers and one of the following controller
-  // --> return error; preceding controllers are not activated,
+  // Test Case 3: Trying to activate a preceding controller and one of the following controller
+  // --> return error; preceding controller are not activated,
   // BUT following controller IS activated
   static std::unordered_map<int32_t, ExpectedBehaviorStruct> expected_case3 = {
     {controller_manager_msgs::srv::SwitchController::Request::STRICT,
@@ -866,9 +864,9 @@ TEST_P(TestControllerChainingWithControllerManager, test_chained_controllers_act
     expected_case3.at(test_param.strictness).future_status,
     expected_case3.at(test_param.strictness).return_type);
 
-  // Preceding controllers should stay deactivated and following controller
+  // Preceding controller should stay deactivated and following controller
   // should be activated (if BEST_EFFORT)
-  // If STRICT, preceding controllers and following controller should stay deactivated
+  // If STRICT, preceding controller and following controller should stay deactivated
   ASSERT_EQ(
     expected_case3.at(test_param.strictness).state, pid_left_wheel_controller->get_state().id());
   ASSERT_EQ(
@@ -881,14 +879,12 @@ TEST_P(TestControllerChainingWithControllerManager, test_chained_controllers_act
     position_tracking_controller->get_state().id());
 
   // TODO: BUG2
-#if 0
   // Check if the controllers are not in chained mode
   ASSERT_FALSE(
     pid_left_wheel_controller->is_in_chained_mode());  // should be not in chained mode but is in
   ASSERT_FALSE(pid_right_wheel_controller->is_in_chained_mode());
   ASSERT_FALSE(diff_drive_controller->is_in_chained_mode());
   EXPECT_FALSE(position_tracking_controller->is_in_chained_mode());
-#endif
   // TODO: BUG2
 }
 
@@ -1042,7 +1038,6 @@ TEST_P(
   verify_all_controllers_are_still_be_active();
 
   // Attempt to deactivate the middle following controller
-#if 0
   // TODO: BUG3
   switch_test_controllers(
     {}, {DIFF_DRIVE_CONTROLLER}, test_param.strictness, std::future_status::ready,
@@ -1067,10 +1062,8 @@ TEST_P(
     {}, {PID_LEFT_WHEEL, PID_RIGHT_WHEEL, DIFF_DRIVE_CONTROLLER}, test_param.strictness,
     std::future_status::ready, expected.at(test_param.strictness).return_type);
   verify_all_controllers_are_still_be_active();
-#endif
 }
 
-#if 0
 TEST_P(
   TestControllerChainingWithControllerManager,
   test_chained_controllers_activation_switching_error_handling)
@@ -1136,9 +1129,7 @@ TEST_P(
   ASSERT_EQ(
     lifecycle_msgs::msg::State::PRIMARY_STATE_ACTIVE, diff_drive_controller_two->get_state().id());
 }
-#endif
 
-#if 0
 TEST_P(
   TestControllerChainingWithControllerManager, test_chained_controllers_deactivation_error_handling)
 {
@@ -1401,7 +1392,6 @@ TEST_P(TestControllerChainingWithControllerManager, test_chained_controllers_add
   reference = {1024.0, 4096.0};
   UpdateAllControllerAndCheck(reference, 3u);
 }
-#endif
 
 INSTANTIATE_TEST_SUITE_P(
   test_strict_best_effort, TestControllerChainingWithControllerManager,

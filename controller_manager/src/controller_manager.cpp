@@ -958,145 +958,156 @@ controller_interface::return_type ControllerManager::switch_controller(
     return ret;
   }
 
-  const auto show_list = [this](const std::string & tag)
-  {
-    RCLCPP_WARN(get_logger(), "[%s]----------------", tag.c_str());
-    RCLCPP_WARN(get_logger(), "Activating controllers:");
-    for (const auto & controller : activate_request_)
-    {
-      RCLCPP_WARN(get_logger(), " - %s", controller.c_str());
-    }
-    RCLCPP_WARN(get_logger(), "Deactivating controllers:");
-    for (const auto & controller : deactivate_request_)
-    {
-      RCLCPP_WARN(get_logger(), " - %s", controller.c_str());
-    }
-    RCLCPP_WARN(get_logger(), "to chained mode:");
-    for (const auto & req : to_chained_mode_request_)
-    {
-      RCLCPP_WARN(get_logger(), " - %s", req.c_str());
-    }
-    RCLCPP_WARN(get_logger(), "from chained mode:");
-    for (const auto & req : from_chained_mode_request_)
-    {
-      RCLCPP_WARN(get_logger(), " - %s", req.c_str());
-    }
-    RCLCPP_WARN(get_logger(), "----------------");
-  };
-
-  RCLCPP_WARN(get_logger(), "STRICTNESS: %d", strictness);
-  show_list("REQUEST");
-
   // lock controllers
   std::lock_guard<std::recursive_mutex> guard(rt_controllers_wrapper_.controllers_lock_);
 
   const std::vector<ControllerSpec> & controllers = rt_controllers_wrapper_.get_updated_list(guard);
 
-  // if a preceding controller is deactivated, all first-level controllers should be switched 'from'
-  // chained mode
-  propagate_deactivation_of_chained_mode(controllers);
-  show_list("AFTER PROPAGATE");
-
-  // check if controllers should be switched 'to' chained mode when controllers are activated
-  for (auto ctrl_it = activate_request_.begin(); ctrl_it != activate_request_.end(); ++ctrl_it)
+  enum class CreateRequestResult
   {
-    auto controller_it = std::find_if(
-      controllers.begin(), controllers.end(),
-      std::bind(controller_name_compare, std::placeholders::_1, *ctrl_it));
-    controller_interface::return_type status = controller_interface::return_type::OK;
-
-    // if controller is not inactive then do not do any following-controllers checks
-    if (!is_controller_inactive(controller_it->c))
-    {
-      RCLCPP_WARN(
-        get_logger(),
-        "Controller with name '%s' is not inactive so its following "
-        "controllers do not have to be checked, because it cannot be activated.",
-        controller_it->info.name.c_str());
-      status = controller_interface::return_type::ERROR;
-    }
-    else
-    {
-      status = check_following_controllers_for_activate(controllers, strictness, controller_it);
-    }
-
-    if (status != controller_interface::return_type::OK)
-    {
-      RCLCPP_WARN(
-        get_logger(),
-        "Could not activate controller with name '%s'. Check above warnings for more details. "
-        "Check the state of the controllers and their required interfaces using "
-        "`ros2 control list_controllers -v` CLI to get more information.",
-        (*ctrl_it).c_str());
-      if (strictness == controller_manager_msgs::srv::SwitchController::Request::BEST_EFFORT)
-      {
-        // TODO(destogl): automatic manipulation of the chain:
-        // || strictness ==
-        //  controller_manager_msgs::srv::SwitchController::Request::MANIPULATE_CONTROLLERS_CHAIN);
-        // remove controller that can not be activated from the activation request and step-back
-        // iterator to correctly step to the next element in the list in the loop
-        activate_request_.erase(ctrl_it);
-        --ctrl_it;
-      }
-      if (strictness == controller_manager_msgs::srv::SwitchController::Request::STRICT)
-      {
-        RCLCPP_ERROR(get_logger(), "Aborting, no controller is switched! (::STRICT switch)");
-        // reset all lists
-        clear_requests();
-        return controller_interface::return_type::ERROR;
-      }
-    }
-  }
-
-  show_list("AFTER ACTIVATE CHECK");
-
-  // check if controllers should be deactivated if used in chained mode
-  for (auto ctrl_it = deactivate_request_.begin(); ctrl_it != deactivate_request_.end(); ++ctrl_it)
+    OK,
+    ERROR,
+    RETRY
+  };
+  const auto create_request = [this, &strictness, &controllers]() -> CreateRequestResult
   {
-    auto controller_it = std::find_if(
-      controllers.begin(), controllers.end(),
-      std::bind(controller_name_compare, std::placeholders::_1, *ctrl_it));
-    controller_interface::return_type status = controller_interface::return_type::OK;
-
-    // if controller is not active then skip preceding-controllers checks
-    if (!is_controller_active(controller_it->c))
+    const auto clear_chained_mode_request = [this]()
     {
-      RCLCPP_WARN(
-        get_logger(), "Controller with name '%s' can not be deactivated since it is not active.",
-        controller_it->info.name.c_str());
-      status = controller_interface::return_type::ERROR;
-    }
-    else
-    {
-      status = check_preceeding_controllers_for_deactivate(controllers, strictness, controller_it);
-    }
-
-    if (status != controller_interface::return_type::OK)
-    {
-      RCLCPP_WARN(
-        get_logger(),
-        "Could not deactivate controller with name '%s'. Check above warnings for more details. "
-        "Check the state of the controllers and their required interfaces using "
-        "`ros2 control list_controllers -v` CLI to get more information.",
-        (*ctrl_it).c_str());
-      if (strictness == controller_manager_msgs::srv::SwitchController::Request::BEST_EFFORT)
+      // Set these interfaces as unavailable when clearing requests to avoid leaving them in
+      // available state without the controller being in active state
+      for (const auto & controller_name : to_chained_mode_request_)
       {
-        // remove controller that can not be activated from the activation request and step-back
-        // iterator to correctly step to the next element in the list in the loop
-        deactivate_request_.erase(ctrl_it);
-        --ctrl_it;
+        resource_manager_->make_controller_reference_interfaces_unavailable(controller_name);
       }
-      if (strictness == controller_manager_msgs::srv::SwitchController::Request::STRICT)
+      from_chained_mode_request_.clear();
+      to_chained_mode_request_.clear();
+    };
+
+    // if a preceding controller is deactivated, all first-level controllers should be switched
+    // 'from' chained mode
+    propagate_deactivation_of_chained_mode(controllers);
+
+    // check if controllers should be switched 'to' chained mode when controllers are activated
+    for (auto ctrl_it = activate_request_.begin(); ctrl_it != activate_request_.end(); ++ctrl_it)
+    {
+      auto controller_it = std::find_if(
+        controllers.begin(), controllers.end(),
+        std::bind(controller_name_compare, std::placeholders::_1, *ctrl_it));
+      controller_interface::return_type status = controller_interface::return_type::OK;
+
+      // if controller is not inactive then do not do any following-controllers checks
+      if (!is_controller_inactive(controller_it->c))
       {
-        RCLCPP_ERROR(get_logger(), "Aborting, no controller is switched! (::STRICT switch)");
-        // reset all lists
-        clear_requests();
-        return controller_interface::return_type::ERROR;
+        RCLCPP_WARN(
+          get_logger(),
+          "Controller with name '%s' is not inactive so its following "
+          "controllers do not have to be checked, because it cannot be activated.",
+          controller_it->info.name.c_str());
+        status = controller_interface::return_type::ERROR;
+      }
+      else
+      {
+        status = check_following_controllers_for_activate(controllers, strictness, controller_it);
+      }
+
+      if (status != controller_interface::return_type::OK)
+      {
+        RCLCPP_WARN(
+          get_logger(),
+          "Could not activate controller with name '%s'. Check above warnings for more details. "
+          "Check the state of the controllers and their required interfaces using "
+          "`ros2 control list_controllers -v` CLI to get more information.",
+          (*ctrl_it).c_str());
+        if (strictness == controller_manager_msgs::srv::SwitchController::Request::BEST_EFFORT)
+        {
+          // TODO(destogl): automatic manipulation of the chain:
+          // || strictness ==
+          //  controller_manager_msgs::srv::SwitchController::Request::MANIPULATE_CONTROLLERS_CHAIN);
+          // remove controller that can not be activated from the activation request and step-back
+          // iterator to correctly step to the next element in the list in the loop
+          activate_request_.erase(ctrl_it);
+          // reset chained mode request lists and will retry the creation of the request
+          clear_chained_mode_request();
+          return CreateRequestResult::RETRY;
+        }
+        if (strictness == controller_manager_msgs::srv::SwitchController::Request::STRICT)
+        {
+          RCLCPP_ERROR(get_logger(), "Aborting, no controller is switched! (::STRICT switch)");
+          // reset all lists
+          clear_requests();
+          return CreateRequestResult::ERROR;
+        }
       }
     }
+
+    // check if controllers should be deactivated if used in chained mode
+    for (auto ctrl_it = deactivate_request_.begin(); ctrl_it != deactivate_request_.end();
+         ++ctrl_it)
+    {
+      auto controller_it = std::find_if(
+        controllers.begin(), controllers.end(),
+        std::bind(controller_name_compare, std::placeholders::_1, *ctrl_it));
+      controller_interface::return_type status = controller_interface::return_type::OK;
+
+      // if controller is not active then skip preceding-controllers checks
+      if (!is_controller_active(controller_it->c))
+      {
+        RCLCPP_WARN(
+          get_logger(), "Controller with name '%s' can not be deactivated since it is not active.",
+          controller_it->info.name.c_str());
+        status = controller_interface::return_type::ERROR;
+      }
+      else
+      {
+        status =
+          check_preceeding_controllers_for_deactivate(controllers, strictness, controller_it);
+      }
+
+      if (status != controller_interface::return_type::OK)
+      {
+        RCLCPP_WARN(
+          get_logger(),
+          "Could not deactivate controller with name '%s'. Check above warnings for more details. "
+          "Check the state of the controllers and their required interfaces using "
+          "`ros2 control list_controllers -v` CLI to get more information.",
+          (*ctrl_it).c_str());
+        if (strictness == controller_manager_msgs::srv::SwitchController::Request::BEST_EFFORT)
+        {
+          // remove controller that can not be activated from the activation request and step-back
+          // iterator to correctly step to the next element in the list in the loop
+          deactivate_request_.erase(ctrl_it);
+          // reset chained mode request lists and will retry the creation of the request
+          clear_chained_mode_request();
+          return CreateRequestResult::RETRY;
+        }
+        if (strictness == controller_manager_msgs::srv::SwitchController::Request::STRICT)
+        {
+          RCLCPP_ERROR(get_logger(), "Aborting, no controller is switched! (::STRICT switch)");
+          // reset all lists
+          clear_requests();
+          return CreateRequestResult::ERROR;
+        }
+      }
+    }
+
+    return CreateRequestResult::OK;
+  };
+
+  // loop until create_request() returns OK or ERROR
+  while (true)
+  {
+    const auto result = create_request();
+    if (result == CreateRequestResult::RETRY)
+    {
+      continue;
+    }
+    if (result == CreateRequestResult::ERROR)
+    {
+      return controller_interface::return_type::ERROR;
+    }
+    // if result == CreateRequestResult::OK
+    break;
   }
-
-  show_list("AFTER DEACTIVATE CHECK");
 
   for (const auto & controller : controllers)
   {
@@ -1259,8 +1270,6 @@ controller_interface::return_type ControllerManager::switch_controller(
       resource_manager_->cache_controller_to_hardware(controller.info.name, interface_names);
     }
   }
-
-  show_list("FINAL");
 
   if (activate_request_.empty() && deactivate_request_.empty())
   {
