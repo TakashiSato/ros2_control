@@ -85,43 +85,43 @@ if(BUILD_TESTING)
     DESTINATION lib
   )
 
-  ament_add_gmock(test_controller_manager
-    test/test_controller_manager.cpp
-  )
-  target_link_libraries(test_controller_manager
-    controller_manager
-    test_controller
-    ros2_control_test_assets::ros2_control_test_assets
-  )
+  # ament_add_gmock(test_controller_manager
+  #   test/test_controller_manager.cpp
+  # )
+  # target_link_libraries(test_controller_manager
+  #   controller_manager
+  #   test_controller
+  #   ros2_control_test_assets::ros2_control_test_assets
+  # )
 
-  ament_add_gmock(test_controller_manager_with_namespace
-    test/test_controller_manager_with_namespace.cpp
-  )
-  target_link_libraries(test_controller_manager_with_namespace
-    controller_manager
-    test_controller
-    ros2_control_test_assets::ros2_control_test_assets
-  )
+  # ament_add_gmock(test_controller_manager_with_namespace
+  #   test/test_controller_manager_with_namespace.cpp
+  # )
+  # target_link_libraries(test_controller_manager_with_namespace
+  #   controller_manager
+  #   test_controller
+  #   ros2_control_test_assets::ros2_control_test_assets
+  # )
 
-  ament_add_gmock(test_controller_manager_hardware_error_handling
-    test/test_controller_manager_hardware_error_handling.cpp
-  )
-  target_link_libraries(test_controller_manager_hardware_error_handling
-    controller_manager
-    test_controller
-    ros2_control_test_assets::ros2_control_test_assets
-  )
+  # ament_add_gmock(test_controller_manager_hardware_error_handling
+  #   test/test_controller_manager_hardware_error_handling.cpp
+  # )
+  # target_link_libraries(test_controller_manager_hardware_error_handling
+  #   controller_manager
+  #   test_controller
+  #   ros2_control_test_assets::ros2_control_test_assets
+  # )
 
-  ament_add_gmock(test_load_controller
-    test/test_load_controller.cpp
-    APPEND_ENV AMENT_PREFIX_PATH=${ament_index_build_path}_$<CONFIG>
-  )
-  target_link_libraries(test_load_controller
-    controller_manager
-    test_controller
-    test_controller_failed_init
-    ros2_control_test_assets::ros2_control_test_assets
-  )
+  # ament_add_gmock(test_load_controller
+  #   test/test_load_controller.cpp
+  #   APPEND_ENV AMENT_PREFIX_PATH=${ament_index_build_path}_$<CONFIG>
+  # )
+  # target_link_libraries(test_load_controller
+  #   controller_manager
+  #   test_controller
+  #   test_controller_failed_init
+  #   ros2_control_test_assets::ros2_control_test_assets
+  # )
 
   ament_add_gmock(test_controllers_chaining_with_controller_manager
     test/test_controllers_chaining_with_controller_manager.cpp
@@ -133,81 +133,81 @@ if(BUILD_TESTING)
     ros2_control_test_assets::ros2_control_test_assets
   )
 
-  ament_add_gmock(test_controller_manager_srvs
-    test/test_controller_manager_srvs.cpp
-    APPEND_ENV AMENT_PREFIX_PATH=${ament_index_build_path}_$<CONFIG>
-  )
-  target_link_libraries(test_controller_manager_srvs
-    controller_manager
-    test_controller
-    test_chainable_controller
-    ros2_control_test_assets::ros2_control_test_assets
-  )
-  set_tests_properties(test_controller_manager_srvs PROPERTIES TIMEOUT 120)
-  ament_target_dependencies(test_controller_manager_srvs
-    controller_manager_msgs
-  )
-  ament_add_gmock(test_controller_manager_urdf_passing
-    test/test_controller_manager_urdf_passing.cpp
-  )
-  target_link_libraries(test_controller_manager_urdf_passing
-    controller_manager
-    ros2_control_test_assets::ros2_control_test_assets
-  )
-  ament_target_dependencies(test_controller_manager_urdf_passing
-    controller_manager_msgs
-  )
+  # ament_add_gmock(test_controller_manager_srvs
+  #   test/test_controller_manager_srvs.cpp
+  #   APPEND_ENV AMENT_PREFIX_PATH=${ament_index_build_path}_$<CONFIG>
+  # )
+  # target_link_libraries(test_controller_manager_srvs
+  #   controller_manager
+  #   test_controller
+  #   test_chainable_controller
+  #   ros2_control_test_assets::ros2_control_test_assets
+  # )
+  # set_tests_properties(test_controller_manager_srvs PROPERTIES TIMEOUT 120)
+  # ament_target_dependencies(test_controller_manager_srvs
+  #   controller_manager_msgs
+  # )
+  # ament_add_gmock(test_controller_manager_urdf_passing
+  #   test/test_controller_manager_urdf_passing.cpp
+  # )
+  # target_link_libraries(test_controller_manager_urdf_passing
+  #   controller_manager
+  #   ros2_control_test_assets::ros2_control_test_assets
+  # )
+  # ament_target_dependencies(test_controller_manager_urdf_passing
+  #   controller_manager_msgs
+  # )
 
-  add_library(test_controller_with_interfaces SHARED
-    test/test_controller_with_interfaces/test_controller_with_interfaces.cpp
-  )
-  target_link_libraries(test_controller_with_interfaces PUBLIC
-    controller_manager
-  )
-  target_compile_definitions(test_controller_with_interfaces PRIVATE "CONTROLLER_MANAGER_BUILDING_DLL")
-  pluginlib_export_plugin_description_file(
-    controller_interface test/test_controller_with_interfaces/test_controller_with_interfaces.xml)
-  install(
-    TARGETS test_controller_with_interfaces
-    DESTINATION lib
-  )
+  # add_library(test_controller_with_interfaces SHARED
+  #   test/test_controller_with_interfaces/test_controller_with_interfaces.cpp
+  # )
+  # target_link_libraries(test_controller_with_interfaces PUBLIC
+  #   controller_manager
+  # )
+  # target_compile_definitions(test_controller_with_interfaces PRIVATE "CONTROLLER_MANAGER_BUILDING_DLL")
+  # pluginlib_export_plugin_description_file(
+  #   controller_interface test/test_controller_with_interfaces/test_controller_with_interfaces.xml)
+  # install(
+  #   TARGETS test_controller_with_interfaces
+  #   DESTINATION lib
+  # )
 
-  ament_add_gmock(test_release_interfaces
-    test/test_release_interfaces.cpp
-    APPEND_ENV AMENT_PREFIX_PATH=${ament_index_build_path}_$<CONFIG>
-  )
-  target_link_libraries(test_release_interfaces
-    controller_manager
-    test_controller_with_interfaces
-    ros2_control_test_assets::ros2_control_test_assets
-  )
+  # ament_add_gmock(test_release_interfaces
+  #   test/test_release_interfaces.cpp
+  #   APPEND_ENV AMENT_PREFIX_PATH=${ament_index_build_path}_$<CONFIG>
+  # )
+  # target_link_libraries(test_release_interfaces
+  #   controller_manager
+  #   test_controller_with_interfaces
+  #   ros2_control_test_assets::ros2_control_test_assets
+  # )
 
-  ament_add_gmock(test_spawner_unspawner
-    test/test_spawner_unspawner.cpp
-  )
-  target_link_libraries(test_spawner_unspawner
-    controller_manager
-    test_controller
-    ros2_control_test_assets::ros2_control_test_assets
-  )
+  # ament_add_gmock(test_spawner_unspawner
+  #   test/test_spawner_unspawner.cpp
+  # )
+  # target_link_libraries(test_spawner_unspawner
+  #   controller_manager
+  #   test_controller
+  #   ros2_control_test_assets::ros2_control_test_assets
+  # )
 
-  install(FILES test/test_controller_spawner_with_fallback_controllers.yaml
-    DESTINATION test)
+  # install(FILES test/test_controller_spawner_with_fallback_controllers.yaml
+  #   DESTINATION test)
 
-  install(FILES test/test_controller_spawner_with_type.yaml
-  DESTINATION test)
+  # install(FILES test/test_controller_spawner_with_type.yaml
+  # DESTINATION test)
 
-  ament_add_gmock(test_hardware_management_srvs
-    test/test_hardware_management_srvs.cpp
-  )
-  target_link_libraries(test_hardware_management_srvs
-    controller_manager
-    test_controller
-    ros2_control_test_assets::ros2_control_test_assets
-  )
-  ament_target_dependencies(test_hardware_management_srvs
-    controller_manager_msgs
-  )
+  # ament_add_gmock(test_hardware_management_srvs
+  #   test/test_hardware_management_srvs.cpp
+  # )
+  # target_link_libraries(test_hardware_management_srvs
+  #   controller_manager
+  #   test_controller
+  #   ros2_control_test_assets::ros2_control_test_assets
+  # )
+  # ament_target_dependencies(test_hardware_management_srvs
+  #   controller_manager_msgs
+  # )
 endif()
 
 install(

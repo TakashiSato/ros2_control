@@ -958,6 +958,35 @@ controller_interface::return_type ControllerManager::switch_controller(
     return ret;
   }
 
+  const auto show_list = [this](const std::string & tag)
+  {
+    RCLCPP_WARN(get_logger(), "[%s]----------------", tag.c_str());
+    RCLCPP_WARN(get_logger(), "Activating controllers:");
+    for (const auto & controller : activate_request_)
+    {
+      RCLCPP_WARN(get_logger(), " - %s", controller.c_str());
+    }
+    RCLCPP_WARN(get_logger(), "Deactivating controllers:");
+    for (const auto & controller : deactivate_request_)
+    {
+      RCLCPP_WARN(get_logger(), " - %s", controller.c_str());
+    }
+    RCLCPP_WARN(get_logger(), "to chained mode:");
+    for (const auto & req : to_chained_mode_request_)
+    {
+      RCLCPP_WARN(get_logger(), " - %s", req.c_str());
+    }
+    RCLCPP_WARN(get_logger(), "from chained mode:");
+    for (const auto & req : from_chained_mode_request_)
+    {
+      RCLCPP_WARN(get_logger(), " - %s", req.c_str());
+    }
+    RCLCPP_WARN(get_logger(), "----------------");
+  };
+
+  RCLCPP_WARN(get_logger(), "STRICTNESS: %d", strictness);
+  show_list("REQUEST");
+
   // lock controllers
   std::lock_guard<std::recursive_mutex> guard(rt_controllers_wrapper_.controllers_lock_);
 
@@ -966,6 +995,7 @@ controller_interface::return_type ControllerManager::switch_controller(
   // if a preceding controller is deactivated, all first-level controllers should be switched 'from'
   // chained mode
   propagate_deactivation_of_chained_mode(controllers);
+  show_list("AFTER PROPAGATE");
 
   // check if controllers should be switched 'to' chained mode when controllers are activated
   for (auto ctrl_it = activate_request_.begin(); ctrl_it != activate_request_.end(); ++ctrl_it)
@@ -1018,6 +1048,8 @@ controller_interface::return_type ControllerManager::switch_controller(
     }
   }
 
+  show_list("AFTER ACTIVATE CHECK");
+
   // check if controllers should be deactivated if used in chained mode
   for (auto ctrl_it = deactivate_request_.begin(); ctrl_it != deactivate_request_.end(); ++ctrl_it)
   {
@@ -1063,6 +1095,8 @@ controller_interface::return_type ControllerManager::switch_controller(
       }
     }
   }
+
+  show_list("AFTER DEACTIVATE CHECK");
 
   for (const auto & controller : controllers)
   {
@@ -1225,6 +1259,8 @@ controller_interface::return_type ControllerManager::switch_controller(
       resource_manager_->cache_controller_to_hardware(controller.info.name, interface_names);
     }
   }
+
+  show_list("FINAL");
 
   if (activate_request_.empty() && deactivate_request_.empty())
   {
