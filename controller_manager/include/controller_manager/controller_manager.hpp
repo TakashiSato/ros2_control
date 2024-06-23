@@ -339,6 +339,7 @@ private:
    * and "control loop" threads.
    */
   void clear_requests();
+  void clear_chained_mode_requests();
 
   /**
    * If a controller is deactivated all following controllers (if any exist) should be switched
