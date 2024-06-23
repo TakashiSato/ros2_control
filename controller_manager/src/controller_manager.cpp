@@ -963,26 +963,28 @@ controller_interface::return_type ControllerManager::switch_controller(
 
   const std::vector<ControllerSpec> & controllers = rt_controllers_wrapper_.get_updated_list(guard);
 
+  const auto clear_chained_mode_request = [this]()
+  {
+    // Set these interfaces as unavailable when clearing requests to avoid leaving them in
+    // available state without the controller being in active state
+    for (const auto & controller_name : to_chained_mode_request_)
+    {
+      resource_manager_->make_controller_reference_interfaces_unavailable(controller_name);
+    }
+    from_chained_mode_request_.clear();
+    to_chained_mode_request_.clear();
+  };
+
   enum class CreateRequestResult
   {
     OK,
     ERROR,
     RETRY
   };
-  const auto create_request = [this, &strictness, &controllers]() -> CreateRequestResult
-  {
-    const auto clear_chained_mode_request = [this]()
-    {
-      // Set these interfaces as unavailable when clearing requests to avoid leaving them in
-      // available state without the controller being in active state
-      for (const auto & controller_name : to_chained_mode_request_)
-      {
-        resource_manager_->make_controller_reference_interfaces_unavailable(controller_name);
-      }
-      from_chained_mode_request_.clear();
-      to_chained_mode_request_.clear();
-    };
 
+  const auto check_de_activate_request_and_create_chained_mode_request =
+    [this, &strictness, &controllers, &clear_chained_mode_request]() -> CreateRequestResult
+  {
     // if a preceding controller is deactivated, all first-level controllers should be switched
     // 'from' chained mode
     propagate_deactivation_of_chained_mode(controllers);
@@ -1093,10 +1095,15 @@ controller_interface::return_type ControllerManager::switch_controller(
     return CreateRequestResult::OK;
   };
 
-  // loop until create_request() returns OK or ERROR
+  // Validate the (de)activate request and create from/to chained mode requests as needed.
+  // If the strictness value is STRICT, return an error for any invalid request.
+  // If the strictness value is BEST_EFFORT, remove any controllers that cannot be
+  // (de)activated from the request and proceed. However, any changes to the
+  // (de)activate request will affect the outcome of the check and creation process,
+  // so retry from the beginning.
   while (true)
   {
-    const auto result = create_request();
+    const auto result = check_de_activate_request_and_create_chained_mode_request();
     if (result == CreateRequestResult::RETRY)
     {
       continue;
@@ -1105,7 +1112,7 @@ controller_interface::return_type ControllerManager::switch_controller(
     {
       return controller_interface::return_type::ERROR;
     }
-    // if result == CreateRequestResult::OK
+    // if result == CreateRequestResult::OK -> break the loop
     break;
   }
 
