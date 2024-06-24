@@ -468,7 +468,6 @@ public:
   };
 };
 
-#if 0
 // The tests are implementing example of chained-control for DiffDrive robot shown here:
 // https://github.com/ros-controls/roadmap/blob/9f32e215a84347aee0b519cb24d081f23bbbb224/design_drafts/cascade_control.md#motivation-purpose-and-use
 // The controller have the names as stated in figure, but they are simply forwarding values without
@@ -692,7 +691,6 @@ TEST_P(
   EXPECT_FALSE(pid_right_wheel_controller->is_in_chained_mode());
   ASSERT_FALSE(diff_drive_controller->is_in_chained_mode());
 }
-#endif
 
 TEST_P(
   TestControllerChainingWithControllerManager, test_chained_controllers_activation_error_handling)

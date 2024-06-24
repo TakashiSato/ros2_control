@@ -170,13 +170,6 @@ void controller_chain_spec_cleanup(
   ctrl_chain_spec.erase(controller);
 }
 
-enum class CreateRequestResult
-{
-  OK,
-  ERROR,
-  RETRY
-};
-
 }  // namespace
 
 namespace controller_manager
@@ -838,21 +831,16 @@ void ControllerManager::clear_requests()
 {
   deactivate_request_.clear();
   activate_request_.clear();
-  clear_chained_mode_requests();
-  activate_command_interface_request_.clear();
-  deactivate_command_interface_request_.clear();
-}
-
-void ControllerManager::clear_chained_mode_requests()
-{
   // Set these interfaces as unavailable when clearing requests to avoid leaving them in
   // available state without the controller being in active state
   for (const auto & controller_name : to_chained_mode_request_)
   {
     resource_manager_->make_controller_reference_interfaces_unavailable(controller_name);
   }
-  from_chained_mode_request_.clear();
   to_chained_mode_request_.clear();
+  from_chained_mode_request_.clear();
+  activate_command_interface_request_.clear();
+  deactivate_command_interface_request_.clear();
 }
 
 controller_interface::return_type ControllerManager::switch_controller(
@@ -975,9 +963,28 @@ controller_interface::return_type ControllerManager::switch_controller(
 
   const std::vector<ControllerSpec> & controllers = rt_controllers_wrapper_.get_updated_list(guard);
 
+  enum class CreateRequestResult
+  {
+    OK,
+    ERROR,
+    RETRY
+  };
+
   const auto check_de_activate_request_and_create_chained_mode_request =
     [this, &strictness, &controllers]() -> CreateRequestResult
   {
+    const auto clear_chained_mode_requests = [this]()
+    {
+      // Set these interfaces as unavailable when clearing requests to avoid leaving them in
+      // available state without the controller being in active state
+      for (const auto & controller_name : to_chained_mode_request_)
+      {
+        resource_manager_->make_controller_reference_interfaces_unavailable(controller_name);
+      }
+      to_chained_mode_request_.clear();
+      from_chained_mode_request_.clear();
+    };
+
     // if a preceding controller is deactivated, all first-level controllers should be switched
     // 'from' chained mode
     propagate_deactivation_of_chained_mode(controllers);
